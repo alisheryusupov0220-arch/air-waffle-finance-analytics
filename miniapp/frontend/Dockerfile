@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Устанавливаем зависимости
-RUN npm ci
+RUN npm ci --only=production
 
 # Копируем код
 COPY . .
@@ -25,6 +25,9 @@ RUN npm install -g serve
 
 # Копируем собранное приложение
 COPY --from=builder /app/dist ./dist
+
+# Открываем порт
+EXPOSE 3000
 
 # Запускаем
 CMD serve -s dist -p $PORT
