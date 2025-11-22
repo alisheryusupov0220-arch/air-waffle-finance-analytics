@@ -94,7 +94,13 @@ app = FastAPI(title="Air Waffle Finance API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "*"],  # Разрешаем с 5173 (Vite) и все
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://web-production-8396.up.railway.app",  # Кассирское приложение
+        "https://finance-system-v5-xxxxx.web.app",     # ← ТВОЙ Firebase URL (замени на реальный)
+        "*"  # Временно разрешаем все для теста
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
