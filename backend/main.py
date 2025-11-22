@@ -10,9 +10,25 @@ from pydantic import BaseModel, Field
 from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
 # -----------------------------
 
-from database import db_session, get_connection, init_cashier_reports_tables, DB_PATH
+from database import db_session, get_connection, init_cashier_reports_tables
 from pathlib import Path
+import os
 import sqlite3
+
+# Определяем ГЛОБАЛЬНЫЙ путь к БД
+if os.path.exists('/data'):
+    DB_PATH = '/data/finance_v5.db'
+else:
+    DB_PATH = 'finance_v5.db'
+
+print(f"📂 Using database path: {DB_PATH}")
+
+
+def get_db_connection():
+    """Получить подключение к базе данных"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 class TimelineItem(BaseModel):
@@ -1259,28 +1275,28 @@ def health():
     return {"status": "healthy"}
 
 
-# Ensure DB directory exists and initialize required tables on startup.
 @app.on_event("startup")
-def on_startup():
+async def startup_event():
+    """Инициализация при запуске"""
     try:
-        db_path = Path(DB_PATH)
-        db_dir = db_path.parent
-        if not db_dir.exists():
-            print(f"Creating DB directory: {db_dir}")
-            db_dir.mkdir(parents=True, exist_ok=True)
-
-        # Ensure the database file exists (connect+close will create it)
-        if not db_path.exists():
-            print(f"Creating DB file at: {db_path}")
-            conn_tmp = sqlite3.connect(str(db_path))
-            conn_tmp.close()
-
-        # Initialize cashier tables and any other migration-time setup
-        init_cashier_reports_tables()
-        print(f"Database initialized at {db_path}")
+        print("🚀 Starting application initialization...")
+        
+        # Создаём директорию /data если нужно
+        if os.path.exists('/data'):
+            os.makedirs('/data', exist_ok=True)
+            print("✅ /data directory ready")
+        
+        # Инициализируем БД
+        from init_db import init_database
+        db_path = init_database()
+        
+        print(f"✅ Application started successfully with DB: {db_path}")
+        
     except Exception as e:
-        # Print the error but do not prevent the app from starting; Railway logs will capture this
-        print(f"Warning: failed to initialize database on startup: {e}")
+        print(f"❌ Startup failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 

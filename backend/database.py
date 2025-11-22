@@ -43,7 +43,17 @@ def db_session() -> Generator[sqlite3.Connection, None, None]:
 
 def init_cashier_reports_tables():
     """Инициализация таблиц для кассирских отчётов"""
-    conn = get_connection()
+    import os
+
+    # ПРАВИЛЬНЫЙ ПУТЬ К БД
+    if os.path.exists('/data'):
+        DB_PATH = '/data/finance_v5.db'
+    else:
+        DB_PATH = 'finance_v5.db'
+
+    print(f"Creating DB at: {DB_PATH}")
+
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     # Таблица точек продаж
