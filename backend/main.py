@@ -1240,6 +1240,18 @@ async def get_account_chart(
         return result
 
 
+# --- Health endpoints (useful for Railway healthchecks) ---
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "Finance API v1.0"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}
+
+
+
 # ========== КАССИРСКИЕ ОТЧЁТЫ ==========
 
 @app.get("/cashier/locations")

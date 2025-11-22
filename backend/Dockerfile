@@ -12,8 +12,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Копируем код
 COPY . .
 
-# Порт
-EXPOSE 8000
-
-# Запуск
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Railway передаёт PORT через переменную окружения
+# Используем shell форму CMD для подстановки переменных
+CMD uvicorn main:app --host 0.0.0.0 --port $PORT
+# ВАЖНО: Убрал EXPOSE и ${PORT:-8000} — Railway сам управляет портами
