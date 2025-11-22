@@ -96,10 +96,11 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "http://localhost:3000",
-        "https://web-production-8396.up.railway.app",  # Кассирское приложение
-        "https://finance-system-v5-xxxxx.web.app",     # ← ТВОЙ Firebase URL (замени на реальный)
-        "*"  # Временно разрешаем все для теста
+        "https://web-production-c9c54.up.railway.app",
+        "https://web-production-8396.up.railway.app",
+        "https://air-waffle-finance.vercel.app",
+        "https://*.vercel.app",
+        "*",
     ],
     allow_credentials=True,
     allow_methods=["*"],
