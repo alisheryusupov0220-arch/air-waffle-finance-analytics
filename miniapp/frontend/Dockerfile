@@ -23,6 +23,9 @@ WORKDIR /app
 # Устанавливаем serve
 RUN npm install -g serve
 
+# Указываем порт (Railway передаст через переменную PORT)
+ENV PORT=3000
+
 # Копируем собранное приложение
 COPY --from=builder /app/dist ./dist
 
@@ -30,4 +33,4 @@ COPY --from=builder /app/dist ./dist
 EXPOSE 3000
 
 # Запускаем
-CMD serve -s dist -p $PORT
+CMD ["sh", "-c", "serve -s dist -l $PORT"]
