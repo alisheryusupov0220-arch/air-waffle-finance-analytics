@@ -14,6 +14,8 @@ from database import db_session, get_connection, init_cashier_reports_tables
 from pathlib import Path
 import os
 import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # Определяем ГЛОБАЛЬНЫЙ путь к БД
 if os.path.exists('/data'):
@@ -26,9 +28,17 @@ print(f"📂 Using database path: {DB_PATH}")
 
 def get_db_connection():
     """Получить подключение к базе данных"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    database_url = os.getenv('DATABASE_URL')
+    
+    if database_url:
+        # PostgreSQL
+        conn = psycopg2.connect(database_url)
+        return conn
+    else:
+        # SQLite fallback для локальной разработки
+        conn = sqlite3.connect('finance_v5.db')
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 class TimelineItem(BaseModel):
@@ -1281,16 +1291,18 @@ async def startup_event():
     try:
         print("🚀 Starting application initialization...")
         
-        # Создаём директорию /data если нужно
-        if os.path.exists('/data'):
-            os.makedirs('/data', exist_ok=True)
-            print("✅ /data directory ready")
+        database_url = os.getenv('DATABASE_URL')
         
-        # Инициализируем БД
-        from init_db import init_database
-        db_path = init_database()
+        if database_url:
+            print("📊 Using PostgreSQL database")
+            from init_db_postgres import init_database
+            init_database()
+        else:
+            print("📁 Using SQLite database (local development)")
+            from init_db import init_database
+            init_database()
         
-        print(f"✅ Application started successfully with DB: {db_path}")
+        print(f"✅ Application started successfully")
         
     except Exception as e:
         print(f"❌ Startup failed: {e}")
