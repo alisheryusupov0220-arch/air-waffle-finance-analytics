@@ -4,10 +4,10 @@ FROM node:18-alpine AS builder
 WORKDIR /app
 
 # Копируем package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
 
 # Устанавливаем зависимости
-RUN npm ci --only=production
+RUN npm ci
 
 # Копируем код
 COPY . .
@@ -33,4 +33,4 @@ COPY --from=builder /app/dist ./dist
 EXPOSE 3000
 
 # Запускаем
-CMD ["sh", "-c", "serve -s dist -l $PORT"]
+CMD ["sh", "-c", "serve -s dist -l ${PORT:-3000}"]
