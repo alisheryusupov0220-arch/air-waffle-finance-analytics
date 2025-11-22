@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
 # -----------------------------
 
-from database import db_session, get_connection
+from database import db_session, get_connection, init_cashier_reports_tables, DB_PATH
+from pathlib import Path
 import sqlite3
 
 
@@ -1256,6 +1257,30 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+# Ensure DB directory exists and initialize required tables on startup.
+@app.on_event("startup")
+def on_startup():
+    try:
+        db_path = Path(DB_PATH)
+        db_dir = db_path.parent
+        if not db_dir.exists():
+            print(f"Creating DB directory: {db_dir}")
+            db_dir.mkdir(parents=True, exist_ok=True)
+
+        # Ensure the database file exists (connect+close will create it)
+        if not db_path.exists():
+            print(f"Creating DB file at: {db_path}")
+            conn_tmp = sqlite3.connect(str(db_path))
+            conn_tmp.close()
+
+        # Initialize cashier tables and any other migration-time setup
+        init_cashier_reports_tables()
+        print(f"Database initialized at {db_path}")
+    except Exception as e:
+        # Print the error but do not prevent the app from starting; Railway logs will capture this
+        print(f"Warning: failed to initialize database on startup: {e}")
 
 
 

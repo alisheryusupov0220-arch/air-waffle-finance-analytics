@@ -12,7 +12,13 @@ except Exception:
     pass
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = Path("/Users/alisheryusupov2002/Desktop/finance_system_v5/finance_v5.db")
+
+# If a FINANCE_DB_PATH env var is provided, use it. Otherwise prefer a
+# mounted persistent volume under /data (Railway, Docker volumes). If /data
+# doesn't exist, fall back to the local development path.
+_dev_path = Path("/Users/alisheryusupov2002/Desktop/finance_system_v5/finance_v5.db")
+_railway_path = Path("/data/finance_v5.db")
+DEFAULT_DB_PATH = _railway_path if Path("/data").exists() else _dev_path
 DB_PATH = Path(os.getenv("FINANCE_DB_PATH", DEFAULT_DB_PATH))
 
 
