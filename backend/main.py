@@ -1277,21 +1277,121 @@ def health():
 
 @app.on_event("startup")
 async def startup_event():
-    """Инициализация при запуске"""
+    """Инициализация базы данных при запуске"""
+    import os
+    from pathlib import Path
     try:
-        print("🚀 Starting application initialization...")
+        print("=" * 60)
+        print("🚀 STARTING APPLICATION")
+        print("=" * 60)
         
-        # Создаём директорию /data если нужно
+        # Определяем путь к БД
         if os.path.exists('/data'):
-            os.makedirs('/data', exist_ok=True)
-            print("✅ /data directory ready")
+            db_path = Path('/data/finance_v5.db')
+            print(f"📊 Production mode: using {db_path}")
+        else:
+            db_path = Path('finance_v5.db')
+            print(f"📁 Development mode: using {db_path}")
         
-        # Инициализируем БД
-        from init_db import init_database
-        db_path = init_database()
+        # Создаём БД если её нет
+        if not db_path.exists():
+            print(f"⚠️  Database not found at {db_path}")
+            print(f"🔧 Creating new database...")
+            try:
+                # Импортируем функцию инициализации
+                from database import init_cashier_reports_tables
+                
+                # Создаём пустой файл БД
+                import sqlite3
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                
+                # Создаём базовые таблицы
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        telegram_id INTEGER UNIQUE NOT NULL,
+                        username TEXT,
+                        full_name TEXT,
+                        role TEXT CHECK (role IN ('owner', 'manager', 'accountant', 'cashier')) DEFAULT 'owner',
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS accounts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        type TEXT CHECK (type IN ('cash', 'bank', 'card')),
+                        account_type TEXT CHECK (account_type IN ('cash', 'bank')),
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS expense_categories (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        parent_id INTEGER,
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (parent_id) REFERENCES expense_categories(id)
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS income_categories (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        is_active INTEGER DEFAULT 1,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS timeline (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id INTEGER,
+                        date TEXT NOT NULL,
+                        type TEXT CHECK (type IN ('expense', 'income', 'transfer', 'incasation')),
+                        category_id INTEGER,
+                        account_id INTEGER,
+                        from_account_id INTEGER,
+                        to_account_id INTEGER,
+                        amount REAL NOT NULL,
+                        commission_amount REAL DEFAULT 0,
+                        description TEXT,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        FOREIGN KEY (category_id) REFERENCES expense_categories(id),
+                        FOREIGN KEY (account_id) REFERENCES accounts(id)
+                    )
+                ''')
+                
+                conn.commit()
+                conn.close()
+                
+                print(f"✅ Database created successfully at {db_path}")
+                
+                # Инициализируем таблицы для кассирских отчётов
+                try:
+                    init_cashier_reports_tables()
+                    print("✅ Cashier reports tables initialized")
+                except Exception as e:
+                    print(f"⚠️  Cashier tables init warning: {e}")
+            except Exception as e:
+                print(f"❌ Database creation failed: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+        else:
+            print(f"✅ Database found at {db_path}")
         
-        print(f"✅ Application started successfully with DB: {db_path}")
-        
+        print("=" * 60)
+        print("✅ APPLICATION STARTED SUCCESSFULLY")
+        print("=" * 60)
     except Exception as e:
         print(f"❌ Startup failed: {e}")
         import traceback
