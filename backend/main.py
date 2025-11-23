@@ -1,44 +1,34 @@
-from datetime import date
-from typing import List, Optional
-
-from fastapi import Depends, FastAPI, HTTPException, Query, Body
-from auth import get_current_user_id
+import os
+import psycopg2
+from psycopg2.extras import RealDictCursor
+from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Optional, List
+from datetime import datetime, date
 from pydantic import BaseModel, Field
+
+# НЕ ИМПОРТИРУЕМ sqlite3! (PostgreSQL-only)
+
+from auth import get_current_user_id
 
 # --- Импорты из analytics.py ---
 from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
 # -----------------------------
 
-from database import db_session, get_connection, init_cashier_reports_tables
-from pathlib import Path
-import os
-import sqlite3
-import psycopg2
-from psycopg2.extras import RealDictCursor
-
-# Определяем ГЛОБАЛЬНЫЙ путь к БД
-if os.path.exists('/data'):
-    DB_PATH = '/data/finance_v5.db'
-else:
-    DB_PATH = 'finance_v5.db'
-
-print(f"📂 Using database path: {DB_PATH}")
-
 
 def get_db_connection():
-    """Получить подключение к базе данных"""
+    """Получить подключение к PostgreSQL"""
     database_url = os.getenv('DATABASE_URL')
     
-    if database_url:
-        # PostgreSQL
-        conn = psycopg2.connect(database_url)
+    if not database_url:
+        raise Exception("❌ DATABASE_URL not set! Check Railway configuration.")
+    
+    try:
+        conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
         return conn
-    else:
-        # SQLite fallback для локальной разработки
-        conn = sqlite3.connect('finance_v5.db')
-        conn.row_factory = sqlite3.Row
-        return conn
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        raise
 
 
 class TimelineItem(BaseModel):
@@ -1289,23 +1279,31 @@ def health():
 async def startup_event():
     """Инициализация при запуске"""
     try:
-        print("🚀 Starting application initialization...")
+        print("=" * 50)
+        print("🚀 STARTING APPLICATION")
+        print("=" * 50)
         
         database_url = os.getenv('DATABASE_URL')
         
-        if database_url:
-            print("📊 Using PostgreSQL database")
-            from init_db_postgres import init_database
-            init_database()
-        else:
-            print("📁 Using SQLite database (local development)")
-            from init_db import init_database
-            init_database()
+        if not database_url:
+            print("❌ CRITICAL: DATABASE_URL environment variable not found!")
+            print("❌ Check Railway Variables configuration")
+            raise Exception("DATABASE_URL not configured")
         
-        print(f"✅ Application started successfully")
+        print(f"✅ DATABASE_URL found: {database_url[:50]}...")
+        print("� Initializing PostgreSQL database...")
+        
+        from init_db_postgres import init_database
+        init_database()
+        
+        print("=" * 50)
+        print("✅ APPLICATION STARTED SUCCESSFULLY")
+        print("=" * 50)
         
     except Exception as e:
-        print(f"❌ Startup failed: {e}")
+        print("=" * 50)
+        print(f"❌ STARTUP FAILED: {e}")
+        print("=" * 50)
         import traceback
         traceback.print_exc()
         raise
