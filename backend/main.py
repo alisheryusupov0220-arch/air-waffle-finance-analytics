@@ -4,7 +4,7 @@ load_dotenv()
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Path
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List
 from datetime import datetime, date
