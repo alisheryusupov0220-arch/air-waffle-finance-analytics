@@ -155,11 +155,12 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://web-production-c9c54.up.railway.app",
-        "https://web-production-8396.up.railway.app",
+        "http://localhost:3000",
         "https://air-waffle-finance.vercel.app",
+        "https://air-waffle-finance-analytics.vercel.app",
         "https://*.vercel.app",
-        "*",
+        "https://air-waffle-backend.onrender.com",
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["*"],
