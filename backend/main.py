@@ -17,18 +17,55 @@ from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
 
 
 def get_db_connection():
-    """Получить подключение к PostgreSQL"""
+    """Получить подключение к PostgreSQL с правильной обработкой Row"""
+    import os
+    import psycopg2
+    import psycopg2.extras
+    
     database_url = os.getenv('DATABASE_URL')
     
     if not database_url:
-        raise Exception("❌ DATABASE_URL not set! Check Railway configuration.")
+        raise Exception("DATABASE_URL not set")
+    
+    # Подключение с RealDictCursor для dict-like доступа
+    conn = psycopg2.connect(database_url)
+    return conn
+
+
+def execute_query(query, params=None, fetch_one=False, fetch_all=False):
+    """Helper для выполнения SQL запросов с PostgreSQL"""
+    import psycopg2.extras
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
     try:
-        conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
-        return conn
+        # Конвертируем ? в %s для PostgreSQL
+        pg_query = query.replace('?', '%s')
+        
+        if params:
+            cursor.execute(pg_query, params)
+        else:
+            cursor.execute(pg_query)
+        
+        if fetch_one:
+            result = cursor.fetchone()
+        elif fetch_all:
+            result = cursor.fetchall()
+        else:
+            result = None
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return result
+        
     except Exception as e:
-        print(f"❌ Database connection failed: {e}")
-        raise
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        raise e
 
 
 class TimelineItem(BaseModel):
@@ -138,17 +175,14 @@ async def verify_user(request: dict):
         if not telegram_id:
             raise HTTPException(status_code=400, detail="telegram_id is required")
         
-        conn = get_connection()
-        conn.row_factory = sqlite3.Row
-        
         # Проверяем существует ли пользователь
-        user = conn.execute(
-            "SELECT * FROM users WHERE telegram_id = ?",
-            (telegram_id,)
-        ).fetchone()
+        user = execute_query(
+            "SELECT * FROM users WHERE telegram_id = %s",
+            (telegram_id,),
+            fetch_one=True
+        )
         
         if user:
-            conn.close()
             return dict(user)
         
         # Создаём нового пользователя
@@ -157,24 +191,23 @@ async def verify_user(request: dict):
         last_name = request.get('last_name', '')
         full_name = f"{first_name} {last_name}".strip() or username or f"User_{telegram_id}"
         
-        cursor = conn.execute("""
-            INSERT INTO users (telegram_id, username, full_name, role, is_active)
-            VALUES (?, ?, ?, 'owner', 1)
-        """, (telegram_id, username, full_name))
-        
-        user_id = cursor.lastrowid
-        conn.commit()
+        execute_query(
+            """INSERT INTO users (telegram_id, username, full_name, role, is_active)
+               VALUES (%s, %s, %s, 'owner', 1)""",
+            (telegram_id, username, full_name)
+        )
         
         # Получаем созданного пользователя
-        new_user = conn.execute(
-            "SELECT * FROM users WHERE id = ?",
-            (user_id,)
-        ).fetchone()
+        new_user = execute_query(
+            "SELECT * FROM users WHERE telegram_id = %s",
+            (telegram_id,),
+            fetch_one=True
+        )
         
-        conn.close()
         return dict(new_user)
         
     except Exception as e:
+        print(f"Auth error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
