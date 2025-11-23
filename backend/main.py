@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -17,30 +20,30 @@ from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
 
 
 def get_db_connection():
-    """Получить подключение к PostgreSQL с правильной обработкой Row"""
-    import os
-    import psycopg2
-    import psycopg2.extras
-    
+    """Подключение к Supabase PostgreSQL"""
     database_url = os.getenv('DATABASE_URL')
     
     if not database_url:
-        raise Exception("DATABASE_URL not set")
+        raise Exception("DATABASE_URL not found! Check .env file or Railway environment variables")
     
-    # Подключение с RealDictCursor для dict-like доступа
-    conn = psycopg2.connect(database_url)
-    return conn
+    try:
+        conn = psycopg2.connect(database_url)
+        return conn
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        print(f"DATABASE_URL: {database_url[:50]}...")
+        raise
 
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
-    """Helper для выполнения SQL запросов с PostgreSQL"""
+    """Выполнить SQL запрос в PostgreSQL"""
     import psycopg2.extras
     
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
     try:
-        # Конвертируем ? в %s для PostgreSQL
+        # PostgreSQL использует %s вместо ?
         pg_query = query.replace('?', '%s')
         
         if params:
@@ -65,6 +68,8 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         conn.rollback()
         cursor.close()
         conn.close()
+        print(f"SQL Error: {e}")
+        print(f"Query: {pg_query}")
         raise e
 
 
@@ -1312,31 +1317,31 @@ def health():
 async def startup_event():
     """Инициализация при запуске"""
     try:
-        print("=" * 50)
-        print("🚀 STARTING APPLICATION")
-        print("=" * 50)
+        print("=" * 60)
+        print("🚀 STARTING AIR WAFFLE FINANCE")
+        print("=" * 60)
         
         database_url = os.getenv('DATABASE_URL')
         
         if not database_url:
-            print("❌ CRITICAL: DATABASE_URL environment variable not found!")
-            print("❌ Check Railway Variables configuration")
-            raise Exception("DATABASE_URL not configured")
+            raise Exception("DATABASE_URL not configured!")
         
-        print(f"✅ DATABASE_URL found: {database_url[:50]}...")
-        print("� Initializing PostgreSQL database...")
+        print(f"📊 Connecting to Supabase PostgreSQL...")
+        print(f"🔗 Database: {database_url.split('@')[1].split('/')[0] if '@' in database_url else 'unknown'}")
         
+        # Инициализация таблиц
         from init_db_postgres import init_database
         init_database()
         
-        print("=" * 50)
+        print("=" * 60)
         print("✅ APPLICATION STARTED SUCCESSFULLY")
-        print("=" * 50)
+        print("✅ Database: Supabase PostgreSQL")
+        print("=" * 60)
         
     except Exception as e:
-        print("=" * 50)
+        print("=" * 60)
         print(f"❌ STARTUP FAILED: {e}")
-        print("=" * 50)
+        print("=" * 60)
         import traceback
         traceback.print_exc()
         raise
