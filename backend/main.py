@@ -1315,7 +1315,9 @@ def health():
 
 @app.on_event("startup")
 async def startup_event():
-    """Инициализация при запуске"""
+    """Инициализация базы данных при запуске"""
+    import os
+    
     try:
         print("=" * 60)
         print("🚀 STARTING AIR WAFFLE FINANCE")
@@ -1324,18 +1326,19 @@ async def startup_event():
         database_url = os.getenv('DATABASE_URL')
         
         if not database_url:
-            raise Exception("DATABASE_URL not configured!")
+            print("❌ CRITICAL: DATABASE_URL environment variable not found!")
+            raise Exception("DATABASE_URL not configured")
         
-        print(f"📊 Connecting to Supabase PostgreSQL...")
-        print(f"🔗 Database: {database_url.split('@')[1].split('/')[0] if '@' in database_url else 'unknown'}")
+        print(f"✅ DATABASE_URL found: {database_url[:60]}...")
+        print("📊 Initializing PostgreSQL database...")
         
-        # Инициализация таблиц
+        # Инициализация PostgreSQL таблиц
         from init_db_postgres import init_database
         init_database()
         
         print("=" * 60)
         print("✅ APPLICATION STARTED SUCCESSFULLY")
-        print("✅ Database: Supabase PostgreSQL")
+        print("✅ Database: PostgreSQL")
         print("=" * 60)
         
     except Exception as e:
