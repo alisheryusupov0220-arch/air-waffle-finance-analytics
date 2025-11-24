@@ -3,6 +3,8 @@ load_dotenv()
 
 import os
 import psycopg2
+import psycopg2.extras
+from contextlib import contextmanager
 from psycopg2.extras import RealDictCursor
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Path
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,6 +36,32 @@ def get_db_connection():
         print(f"DATABASE_URL: {database_url[:50]}...")
         raise
 
+
+@contextmanager
+def db_session():
+    """
+    Context manager для работы с PostgreSQL базой данных.
+    Совместим со старым SQLite API для минимальных изменений кода.
+    """
+    conn = get_db_connection()
+    
+    # Monkey-patch: замена метода cursor для установки RealDictCursor по умолчанию
+    original_cursor = conn.cursor
+    def cursor_wrapper(*args, **kwargs):
+        if 'cursor_factory' not in kwargs:
+            kwargs['cursor_factory'] = psycopg2.extras.RealDictCursor
+        return original_cursor(*args, **kwargs)
+    conn.cursor = cursor_wrapper
+    
+    try:
+        yield conn
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        print(f"❌ Database error: {e}")
+        raise
+    finally:
+        conn.close()
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     """Выполнить SQL запрос в PostgreSQL"""
