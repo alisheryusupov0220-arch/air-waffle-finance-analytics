@@ -41,24 +41,21 @@ def get_db_connection():
 def db_session():
     """
     Context manager для работы с PostgreSQL базой данных.
-    Совместим со старым SQLite API для минимальных изменений кода.
+    Возвращает подключение с автоматическим commit/rollback.
+    
+    Использование:
+        with db_session() as conn:
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute("SELECT * FROM users")
+            result = cursor.fetchall()
     """
     conn = get_db_connection()
-    
-    # Monkey-patch: замена метода cursor для установки RealDictCursor по умолчанию
-    original_cursor = conn.cursor
-    def cursor_wrapper(*args, **kwargs):
-        if 'cursor_factory' not in kwargs:
-            kwargs['cursor_factory'] = psycopg2.extras.RealDictCursor
-        return original_cursor(*args, **kwargs)
-    conn.cursor = cursor_wrapper
-    
     try:
         yield conn
         conn.commit()
     except Exception as e:
         conn.rollback()
-        print(f"❌ Database error: {e}")
+        print(f"❌ Database transaction error: {e}")
         raise
     finally:
         conn.close()
