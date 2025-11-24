@@ -251,7 +251,7 @@ async def get_all_users(current_user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         # Проверяем роль текущего пользователя
         current_user = conn.execute(
-            "SELECT role FROM users WHERE id = ?",
+            "SELECT role FROM users WHERE id = ",
             (current_user_id,)
         ).fetchone()
 
@@ -289,7 +289,7 @@ async def update_user_role(
     with db_session() as conn:
         # Проверяем что текущий пользователь - owner
         current_user = conn.execute(
-            "SELECT role FROM users WHERE id = ?",
+            "SELECT role FROM users WHERE id = ",
             (current_user_id,)
         ).fetchone()
 
@@ -298,7 +298,7 @@ async def update_user_role(
 
         # Обновляем роль
         conn.execute(
-            "UPDATE users SET role = ? WHERE id = ?",
+            "UPDATE users SET role =  WHERE id = ",
             (role, user_id)
         )
 
@@ -315,7 +315,7 @@ async def toggle_user_status(
     with db_session() as conn:
         # Проверяем что текущий пользователь - owner
         current_user = conn.execute(
-            "SELECT role FROM users WHERE id = ?",
+            "SELECT role FROM users WHERE id = ",
             (current_user_id,)
         ).fetchone()
 
@@ -328,7 +328,7 @@ async def toggle_user_status(
 
         # Обновляем статус
         conn.execute(
-            "UPDATE users SET is_active = ? WHERE id = ?",
+            "UPDATE users SET is_active =  WHERE id = ?",
             (1 if is_active else 0, user_id)
         )
 
@@ -352,7 +352,7 @@ async def get_timeline(
                     u.username as created_by_username
                 FROM timeline t
                 LEFT JOIN users u ON t.user_id = u.id
-                WHERE t.date >= ? AND t.date <= ?
+                WHERE t.date >=  AND t.date <= ?
                 ORDER BY t.date DESC, t.id DESC
                 LIMIT ?
                 """,
@@ -368,7 +368,7 @@ async def get_timeline(
                 FROM timeline t
                 LEFT JOIN users u ON t.user_id = u.id
                 ORDER BY t.date DESC, t.id DESC
-                LIMIT ?
+                LIMIT 
                 """,
                 (limit,),
             )
@@ -397,7 +397,7 @@ async def create_expense(
                 source,
                 user_id
             )
-            VALUES (?, 'expense', ?, ?, ?, ?, 'miniapp', ?)
+            VALUES (, 'expense', ?, ?, ?, ?, 'miniapp', ?)
             """,
             (
                 str(payload.date),
@@ -413,7 +413,7 @@ async def create_expense(
         print("Создано expense ID:", timeline_id)
         # -----------------------
         row = conn.execute(
-            "SELECT * FROM timeline WHERE id = ?", (timeline_id,)
+            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create expense")
@@ -441,7 +441,7 @@ async def create_income(
                 source,
                 user_id
             )
-            VALUES (?, 'income', ?, ?, ?, ?, 'miniapp', ?)
+            VALUES (, 'income', ?, ?, ?, ?, 'miniapp', ?)
             """,
             (
                 str(payload.date),
@@ -457,7 +457,7 @@ async def create_income(
         print("Создано income ID:", timeline_id)
         # -----------------------
         row = conn.execute(
-            "SELECT * FROM timeline WHERE id = ?", (timeline_id,)
+            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
         ).fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create income")
@@ -485,7 +485,7 @@ async def create_incasation(
                 from_account_id,
                 to_account_id
             )
-            VALUES (?, 'incasation', ?, ?, 'miniapp', ?, ?, ?)
+            VALUES (, 'incasation', ?, ?, 'miniapp', ?, ?, ?)
             """,
             (
                 str(payload.date),
@@ -501,7 +501,7 @@ async def create_incasation(
         print("Создано incasation ID:", timeline_id)
         # -----------------------
         row = conn.execute(
-            "SELECT * FROM timeline WHERE id = ?", (timeline_id,)
+            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
         ).fetchone()
         if not row:
             raise HTTPException(
@@ -532,7 +532,7 @@ async def create_transfer(
                 to_account_id,
                 commission_amount
             )
-            VALUES (?, 'transfer', ?, ?, 'miniapp', ?, ?, ?, ?)
+            VALUES (, 'transfer', ?, ?, 'miniapp', ?, ?, ?, ?)
             """,
             (
                 str(payload.date),
@@ -549,7 +549,7 @@ async def create_transfer(
         print("Создано transfer ID:", timeline_id)
         # -----------------------
         row = conn.execute(
-            "SELECT * FROM timeline WHERE id = ?", (timeline_id,)
+            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
         ).fetchone()
         if not row:
             raise HTTPException(
@@ -567,7 +567,7 @@ async def update_timeline_item(
     with db_session() as conn:
         # ПРОВЕРКА: может ли пользователь редактировать эту операцию
         check = conn.execute(
-            "SELECT user_id FROM timeline WHERE id = ?",
+            "SELECT user_id FROM timeline WHERE id = ",
             (timeline_id,)
         ).fetchone()
         
@@ -598,7 +598,7 @@ async def update_timeline_item(
                 u.username as created_by_username
             FROM timeline t
             LEFT JOIN users u ON t.user_id = u.id
-            WHERE t.id = ?
+            WHERE t.id = 
             """,
             (timeline_id,)
         )
@@ -618,7 +618,7 @@ async def delete_timeline_item(
     with db_session() as conn:
         # ПРОВЕРКА: может ли пользователь удалить эту операцию
         check = conn.execute(
-            "SELECT user_id FROM timeline WHERE id = ?",
+            "SELECT user_id FROM timeline WHERE id = ",
             (timeline_id,)
         ).fetchone()
         
@@ -631,7 +631,7 @@ async def delete_timeline_item(
                 detail="You can only delete your own operations"
             )
         
-        conn.execute("DELETE FROM timeline WHERE id = ?", (timeline_id,))
+        conn.execute("DELETE FROM timeline WHERE id = ", (timeline_id,))
         return {"success": True}
 
 
@@ -758,7 +758,7 @@ async def get_analytics_settings(user_id: int = Depends(get_current_user_id)):
 async def create_analytics_setting(setting: AnalyticsSetting, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO analytics_settings (category_id, analytic_type) VALUES (?, ?)",
+            "INSERT INTO analytics_settings (category_id, analytic_type) VALUES (, )",
             (setting.category_id, setting.analytic_type),
         )
         new_id = cursor.lastrowid
@@ -769,7 +769,7 @@ async def create_analytics_setting(setting: AnalyticsSetting, user_id: int = Dep
 async def update_analytics_setting(setting_id: int, setting: AnalyticsSetting, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         conn.execute(
-            "UPDATE analytics_settings SET category_id = ?, analytic_type = ? WHERE id = ?",
+            "UPDATE analytics_settings SET category_id = , analytic_type = ? WHERE id = ?",
             (setting.category_id, setting.analytic_type, setting_id),
         )
         return AnalyticsSettingInDB(id=setting_id, **setting.dict())
@@ -778,7 +778,7 @@ async def update_analytics_setting(setting_id: int, setting: AnalyticsSetting, u
 @app.delete("/analytics/settings/{setting_id}")
 async def delete_analytics_setting(setting_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute("DELETE FROM analytics_settings WHERE id = ?", (setting_id,))
+        conn.execute("DELETE FROM analytics_settings WHERE id = ", (setting_id,))
         return {"message": "Deleted"}
 
 
@@ -808,12 +808,12 @@ async def create_expense_category(
 ):
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (?, ?, 1)",
+            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (, ?, 1)",
             (name, parent_id),
         )
         new_id = cursor.lastrowid
         row = conn.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ?",
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (new_id,),
         ).fetchone()
         return row_to_dict(row)
@@ -828,11 +828,11 @@ async def update_expense_category(
 ):
     with db_session() as conn:
         conn.execute(
-            "UPDATE expense_categories SET name = ?, parent_id = ? WHERE id = ?",
+            "UPDATE expense_categories SET name = , parent_id = ? WHERE id = ?",
             (name, parent_id, category_id),
         )
         row = conn.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ?",
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (category_id,),
         ).fetchone()
         return row_to_dict(row)
@@ -842,7 +842,7 @@ async def update_expense_category(
 async def archive_expense_category(category_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         conn.execute(
-            "UPDATE expense_categories SET is_active = 0 WHERE id = ?",
+            "UPDATE expense_categories SET is_active = 0 WHERE id = ",
             (category_id,),
         )
         return {"success": True}
@@ -885,7 +885,7 @@ async def create_unified_category(
     with db_session() as conn:
         # 1. Создать в expense_categories
         cursor = conn.execute(
-            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (?, ?, 1)",
+            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (, , 1)",
             (name, parent_id),
         )
         expense_id = cursor.lastrowid
@@ -893,7 +893,7 @@ async def create_unified_category(
         # 2. Создать в income_categories (БЕЗ parent_id, если его нет в таблице)
         try:
             conn.execute(
-                "INSERT INTO income_categories (name, is_active) VALUES (?, 1)",
+                "INSERT INTO income_categories (name, is_active) VALUES (, 1)",
                 (name,),
             )
         except Exception as e:
@@ -901,7 +901,7 @@ async def create_unified_category(
         
         # 3. Вернуть созданную категорию из expense_categories
         row = conn.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ?",
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (expense_id,),
         ).fetchone()
         
@@ -922,7 +922,7 @@ async def update_unified_category(
     with db_session() as conn:
         # 1. Получить старое имя из expense_categories
         old_row = conn.execute(
-            "SELECT name FROM expense_categories WHERE id = ?",
+            "SELECT name FROM expense_categories WHERE id = ",
             (category_id,),
         ).fetchone()
         
@@ -933,14 +933,14 @@ async def update_unified_category(
         
         # 2. Обновить в expense_categories по ID
         conn.execute(
-            "UPDATE expense_categories SET name = ?, parent_id = ? WHERE id = ?",
+            "UPDATE expense_categories SET name = , parent_id = ? WHERE id = ?",
             (name, parent_id, category_id),
         )
         
         # 3. Обновить в income_categories по СТАРОМУ ИМЕНИ
         try:
             conn.execute(
-                "UPDATE income_categories SET name = ? WHERE name = ?",
+                "UPDATE income_categories SET name =  WHERE name = ?",
                 (name, old_name),
             )
         except Exception as e:
@@ -948,7 +948,7 @@ async def update_unified_category(
         
         # 4. Вернуть обновлённую категорию
         row = conn.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ?",
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (category_id,),
         ).fetchone()
         
@@ -966,7 +966,7 @@ async def archive_unified_category(
     with db_session() as conn:
         # 1. Получить имя категории
         row = conn.execute(
-            "SELECT name FROM expense_categories WHERE id = ?",
+            "SELECT name FROM expense_categories WHERE id = ",
             (category_id,),
         ).fetchone()
         
@@ -977,14 +977,14 @@ async def archive_unified_category(
         
         # 2. Архивировать в expense_categories по ID
         conn.execute(
-            "UPDATE expense_categories SET is_active = 0 WHERE id = ?",
+            "UPDATE expense_categories SET is_active = 0 WHERE id = ",
             (category_id,),
         )
         
         # 3. Архивировать в income_categories по ИМЕНИ
         try:
             conn.execute(
-                "UPDATE income_categories SET is_active = 0 WHERE name = ?",
+                "UPDATE income_categories SET is_active = 0 WHERE name = ",
                 (category_name,),
             )
         except Exception as e:
@@ -1020,12 +1020,12 @@ async def create_account(
 ):
     with db_session() as conn:
         cursor = conn.execute(
-            "INSERT INTO accounts (name, type, is_active) VALUES (?, ?, 1)",
+            "INSERT INTO accounts (name, type, is_active) VALUES (, , 1)",
             (name, type),
         )
         new_id = cursor.lastrowid
         row = conn.execute(
-            "SELECT id, name, type, is_active FROM accounts WHERE id = ?",
+            "SELECT id, name, type, is_active FROM accounts WHERE id = ",
             (new_id,),
         ).fetchone()
         return row_to_dict(row)
@@ -1040,11 +1040,11 @@ async def update_account(
 ):
     with db_session() as conn:
         conn.execute(
-            "UPDATE accounts SET name = ?, type = ? WHERE id = ?",
+            "UPDATE accounts SET name = , type = ? WHERE id = ?",
             (name, type, account_id),
         )
         row = conn.execute(
-            "SELECT id, name, type, is_active FROM accounts WHERE id = ?",
+            "SELECT id, name, type, is_active FROM accounts WHERE id = ",
             (account_id,),
         ).fetchone()
         return row_to_dict(row)
@@ -1054,7 +1054,7 @@ async def update_account(
 async def archive_account(account_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         conn.execute(
-            "UPDATE accounts SET is_active = 0 WHERE id = ?",
+            "UPDATE accounts SET is_active = 0 WHERE id = ",
             (account_id,),
         )
         return {"success": True}
@@ -1099,7 +1099,7 @@ async def create_analytic_block(block: AnalyticBlock, user_id: int = Depends(get
         )
         new_id = cursor.lastrowid
         row = conn.execute(
-            "SELECT * FROM analytic_blocks WHERE id = ?", (new_id,)
+            "SELECT * FROM analytic_blocks WHERE id = ", (new_id,)
         ).fetchone()
         return row_to_dict(row)
 
@@ -1112,7 +1112,7 @@ async def update_analytic_block(
         conn.execute(
             """
             UPDATE analytic_blocks 
-             SET code = ?, name = ?, icon = ?, color = ?, 
+             SET code = , name = ?, icon = ?, color = ?, 
                  threshold_good = ?, threshold_warning = ?, sort_order = ?
             WHERE id = ?
             """,
@@ -1120,7 +1120,7 @@ async def update_analytic_block(
              block.threshold_good, block.threshold_warning, block.sort_order, block_id),
         )
         row = conn.execute(
-            "SELECT * FROM analytic_blocks WHERE id = ?", (block_id,)
+            "SELECT * FROM analytic_blocks WHERE id = ", (block_id,)
         ).fetchone()
         return row_to_dict(row)
 
@@ -1128,7 +1128,7 @@ async def update_analytic_block(
 async def delete_analytic_block(block_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         conn.execute(
-            "UPDATE analytic_blocks SET is_active = 0 WHERE id = ?", (block_id,)
+            "UPDATE analytic_blocks SET is_active = 0 WHERE id = ", (block_id,)
         )
         return {"success": True}
 
@@ -1142,7 +1142,7 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         income_cursor = conn.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type = 'income' AND account_id = ?
+            WHERE type = 'income' AND account_id = 
         """, (account_id,))
         total_income = income_cursor.fetchone()[0]
         
@@ -1150,7 +1150,7 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         expense_cursor = conn.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type = 'expense' AND account_id = ?
+            WHERE type = 'expense' AND account_id = 
         """, (account_id,))
         total_expense = expense_cursor.fetchone()[0]
         
@@ -1158,7 +1158,7 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         transfer_in_cursor = conn.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type IN ('transfer', 'incasation') AND to_account_id = ?
+            WHERE type IN ('transfer', 'incasation') AND to_account_id = 
         """, (account_id,))
         transfer_in = transfer_in_cursor.fetchone()[0]
         
@@ -1166,7 +1166,7 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         transfer_out_cursor = conn.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type IN ('transfer', 'incasation') AND from_account_id = ?
+            WHERE type IN ('transfer', 'incasation') AND from_account_id = 
         """, (account_id,))
         transfer_out = transfer_out_cursor.fetchone()[0]
         
@@ -1427,7 +1427,7 @@ async def create_cashier_report(
         existing = conn.execute(
             """
             SELECT id FROM cashier_reports 
-            WHERE report_date = ? AND location_id = ?
+            WHERE report_date =  AND location_id = ?
             """,
             (report_data['report_date'], report_data['location_id'])
         ).fetchone()
@@ -1444,7 +1444,7 @@ async def create_cashier_report(
             INSERT INTO cashier_reports (
                 report_date, location_id, user_id, total_sales,
                 cash_actual, status, closed_at
-            ) VALUES (?, ?, ?, ?, ?, 'closed', CURRENT_TIMESTAMP)
+            ) VALUES (, ?, ?, ?, ?, 'closed', CURRENT_TIMESTAMP)
             """,
             (
                 report_data['report_date'],
@@ -1461,7 +1461,7 @@ async def create_cashier_report(
             if payment['amount'] > 0:
                 # Получаем процент комиссии
                 method = conn.execute(
-                    "SELECT commission_percent FROM payment_methods WHERE id = ?",
+                    "SELECT commission_percent FROM payment_methods WHERE id = ",
                     (payment['payment_method_id'],)
                 ).fetchone()
 
@@ -1474,7 +1474,7 @@ async def create_cashier_report(
                     INSERT INTO cashier_report_payments (
                         report_id, payment_method_id, amount, 
                         commission_amount, net_amount
-                    ) VALUES (?, ?, ?, ?, ?)
+                    ) VALUES (, ?, ?, ?, ?)
                     """,
                     (report_id, payment['payment_method_id'], 
                       payment['amount'], commission_amount, net_amount)
@@ -1482,7 +1482,7 @@ async def create_cashier_report(
 
                 # Создаём income операцию в timeline (если метод не "наличные")
                 method_info = conn.execute(
-                    "SELECT name, method_type FROM payment_methods WHERE id = ?",
+                    "SELECT name, method_type FROM payment_methods WHERE id = ",
                     (payment['payment_method_id'],)
                 ).fetchone()
 
@@ -1502,14 +1502,14 @@ async def create_cashier_report(
 
                     # Находим счёт или создаём по типу метода
                     account = conn.execute(
-                        "SELECT id FROM accounts WHERE name LIKE ? LIMIT 1",
+                        "SELECT id FROM accounts WHERE name LIKE  LIMIT 1",
                         (f"%{method_info['name']}%",)
                     ).fetchone()
 
                     if not account:
                         # Создаём базовый банковский счёт
                         cur = conn.execute(
-                            "INSERT INTO accounts (name, type, account_type, is_active) VALUES (?, 'bank', 'bank', 1)",
+                            "INSERT INTO accounts (name, type, account_type, is_active) VALUES (, 'bank', 'bank', 1)",
                             (method_info['name'],)
                         )
                         account_id = cur.lastrowid
@@ -1521,7 +1521,7 @@ async def create_cashier_report(
                         INSERT INTO timeline (
                             date, type, category_id, account_id,
                             amount, description, user_id
-                        ) VALUES (?, 'income', ?, ?, ?, ?, ?)
+                        ) VALUES (, 'income', ?, ?, ?, ?, ?)
                     """, (
                         report_data['report_date'],
                         income_cat_id,
@@ -1537,7 +1537,7 @@ async def create_cashier_report(
                 conn.execute("""
                     INSERT INTO cashier_report_expenses (
                         report_id, category_id, amount, description
-                    ) VALUES (?, ?, ?, ?)
+                    ) VALUES (, ?, ?, ?)
                 """, (report_id, expense.get('category_id'), 
                       expense['amount'], expense.get('description', '')))
 
@@ -1552,7 +1552,7 @@ async def create_cashier_report(
                             INSERT INTO timeline (
                                 date, type, category_id, account_id,
                                 amount, description, user_id
-                            ) VALUES (?, 'expense', ?, ?, ?, ?, ?)
+                            ) VALUES (, 'expense', ?, ?, ?, ?, ?)
                         """, (
                             report_data['report_date'],
                             expense['category_id'],
@@ -1568,7 +1568,7 @@ async def create_cashier_report(
                 conn.execute("""
                     INSERT INTO cashier_report_income (
                         report_id, category_id, amount, description
-                    ) VALUES (?, ?, ?, ?)
+                    ) VALUES (, ?, ?, ?)
                 """, (report_id, income.get('category_id'), 
                       income['amount'], income.get('description', '')))
 
@@ -1583,7 +1583,7 @@ async def create_cashier_report(
                             INSERT INTO timeline (
                                 date, type, category_id, account_id,
                                 amount, description, user_id
-                            ) VALUES (?, 'income', ?, ?, ?, ?, ?)
+                            ) VALUES (, 'income', ?, ?, ?, ?, ?)
                         """, (
                             report_data['report_date'],
                             income['category_id'],
@@ -1652,7 +1652,7 @@ async def get_cashier_report_details(
             FROM cashier_reports cr
             LEFT JOIN locations l ON cr.location_id = l.id
             LEFT JOIN users u ON cr.user_id = u.id
-            WHERE cr.id = ?
+            WHERE cr.id = 
         """, (report_id,)).fetchone()
 
         if not report:
@@ -1667,7 +1667,7 @@ async def get_cashier_report_details(
                 pm.method_type
             FROM cashier_report_payments crp
             LEFT JOIN payment_methods pm ON crp.payment_method_id = pm.id
-            WHERE crp.report_id = ?
+            WHERE crp.report_id = 
         """, (report_id,)).fetchall()
         result['payments'] = [row_to_dict(p) for p in payments]
 
@@ -1677,7 +1677,7 @@ async def get_cashier_report_details(
                 ec.name as category_name
             FROM cashier_report_expenses cre
             LEFT JOIN expense_categories ec ON cre.category_id = ec.id
-            WHERE cre.report_id = ?
+            WHERE cre.report_id = 
         """, (report_id,)).fetchall()
         result['expenses'] = [row_to_dict(e) for e in expenses]
 
@@ -1687,7 +1687,7 @@ async def get_cashier_report_details(
                 ic.name as category_name
             FROM cashier_report_income cri
             LEFT JOIN income_categories ic ON cri.category_id = ic.id
-            WHERE cri.report_id = ?
+            WHERE cri.report_id = 
         """, (report_id,)).fetchall()
         result['incomes'] = [row_to_dict(i) for i in incomes]
 
