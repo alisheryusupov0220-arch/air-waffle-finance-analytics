@@ -247,16 +247,19 @@ async def get_all_users(current_user_id: int = Depends(get_current_user_id)):
     """Получить список всех пользователей (только для owner/manager)"""
     with db_session() as conn:
         # Проверяем роль текущего пользователя
-        current_user = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT role FROM users WHERE id = ",
             (current_user_id,)
-        ).fetchone()
+        )
+        current_user = cursor.fetchone()
 
         if not current_user or current_user['role'] not in ['owner', 'manager']:
             raise HTTPException(status_code=403, detail="Access denied. Owner or Manager role required")
 
         # Получаем всех пользователей
-        users = conn.execute("""
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
             SELECT 
                 id,
                 telegram_id,
@@ -268,7 +271,8 @@ async def get_all_users(current_user_id: int = Depends(get_current_user_id)):
             FROM users
             ORDER BY created_at DESC
         """
-        ).fetchall()
+        )
+        users = cursor.fetchall()
 
         return [row_to_dict(user) for user in users]
 
@@ -285,16 +289,19 @@ async def update_user_role(
 
     with db_session() as conn:
         # Проверяем что текущий пользователь - owner
-        current_user = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT role FROM users WHERE id = ",
             (current_user_id,)
-        ).fetchone()
+        )
+        current_user = cursor.fetchone()
 
         if not current_user or current_user['role'] != 'owner':
             raise HTTPException(status_code=403, detail="Access denied. Owner role required")
 
         # Обновляем роль
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE users SET role =  WHERE id = ",
             (role, user_id)
         )
@@ -311,10 +318,12 @@ async def toggle_user_status(
     """Активировать/деактивировать пользователя (только owner)"""
     with db_session() as conn:
         # Проверяем что текущий пользователь - owner
-        current_user = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT role FROM users WHERE id = ",
             (current_user_id,)
-        ).fetchone()
+        )
+        current_user = cursor.fetchone()
 
         if not current_user or current_user['role'] != 'owner':
             raise HTTPException(status_code=403, detail="Access denied. Owner role required")
@@ -324,7 +333,8 @@ async def toggle_user_status(
             raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
 
         # Обновляем статус
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE users SET is_active =  WHERE id = ?",
             (1 if is_active else 0, user_id)
         )
@@ -382,7 +392,8 @@ async def create_expense(
     print("Попытка создать expense:", payload.dict())
     # -----------------------
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             INSERT INTO timeline (
                 date,
@@ -409,9 +420,11 @@ async def create_expense(
         # --- PRINT ДЛЯ ДЕБАГА ---
         print("Создано expense ID:", timeline_id)
         # -----------------------
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create expense")
         return row_to_dict(row)
@@ -426,7 +439,8 @@ async def create_income(
     print("Попытка создать income:", payload.dict())
     # -----------------------
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             INSERT INTO timeline (
                 date,
@@ -453,9 +467,11 @@ async def create_income(
         # --- PRINT ДЛЯ ДЕБАГА ---
         print("Создано income ID:", timeline_id)
         # -----------------------
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create income")
         return row_to_dict(row)
@@ -470,7 +486,8 @@ async def create_incasation(
     print("Попытка создать incasation:", payload.dict())
     # -----------------------
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             INSERT INTO timeline (
                 date,
@@ -497,9 +514,11 @@ async def create_incasation(
         # --- PRINT ДЛЯ ДЕБАГА ---
         print("Создано incasation ID:", timeline_id)
         # -----------------------
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         if not row:
             raise HTTPException(
                 status_code=500, detail="Failed to create incasation record"
@@ -516,7 +535,8 @@ async def create_transfer(
     print("Попытка создать transfer:", payload.dict())
     # -----------------------
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             INSERT INTO timeline (
                 date,
@@ -545,9 +565,11 @@ async def create_transfer(
         # --- PRINT ДЛЯ ДЕБАГА ---
         print("Создано transfer ID:", timeline_id)
         # -----------------------
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         if not row:
             raise HTTPException(
                 status_code=500, detail="Failed to create transfer record"
@@ -563,10 +585,12 @@ async def update_timeline_item(
 ):
     with db_session() as conn:
         # ПРОВЕРКА: может ли пользователь редактировать эту операцию
-        check = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT user_id FROM timeline WHERE id = ",
             (timeline_id,)
-        ).fetchone()
+        )
+        check = cursor.fetchone()
         
         if not check:
             raise HTTPException(status_code=404, detail="Operation not found")
@@ -581,13 +605,15 @@ async def update_timeline_item(
         set_clause = ", ".join([f"{k} = ?" for k in payload.keys()])
         values = list(payload.values()) + [timeline_id]
         
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             f"UPDATE timeline SET {set_clause} WHERE id = ?",
             values
         )
         
         # Возвращаем обновленную операцию с информацией о создателе
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT 
                 t.*,
@@ -614,10 +640,12 @@ async def delete_timeline_item(
 ):
     with db_session() as conn:
         # ПРОВЕРКА: может ли пользователь удалить эту операцию
-        check = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT user_id FROM timeline WHERE id = ",
             (timeline_id,)
-        ).fetchone()
+        )
+        check = cursor.fetchone()
         
         if not check:
             raise HTTPException(status_code=404, detail="Operation not found")
@@ -628,7 +656,8 @@ async def delete_timeline_item(
                 detail="You can only delete your own operations"
             )
         
-        conn.execute("DELETE FROM timeline WHERE id = ", (timeline_id,))
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("DELETE FROM timeline WHERE id = ", (timeline_id,))
         return {"success": True}
 
 
@@ -663,7 +692,8 @@ async def get_expense_categories(user_id: int = Depends(get_current_user_id)):
 @app.get("/categories/income")
 async def get_income_categories(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT *
             FROM income_categories
@@ -742,7 +772,8 @@ async def get_cell_details_endpoint(
 @app.get("/analytics/settings", response_model=List[AnalyticsSettingInDB])
 async def get_analytics_settings(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        cursor = conn.execute("SELECT id, category_id, analytic_type FROM analytics_settings")
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("SELECT id, category_id, analytic_type FROM analytics_settings")
         rows = cursor.fetchall()
         return [AnalyticsSettingInDB(id=row["id"], category_id=row["category_id"], analytic_type=row["analytic_type"]) for row in rows]
 
@@ -750,7 +781,8 @@ async def get_analytics_settings(user_id: int = Depends(get_current_user_id)):
 @app.post("/analytics/settings", response_model=AnalyticsSettingInDB)
 async def create_analytics_setting(setting: AnalyticsSetting, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "INSERT INTO analytics_settings (category_id, analytic_type) VALUES (, )",
             (setting.category_id, setting.analytic_type),
         )
@@ -761,7 +793,8 @@ async def create_analytics_setting(setting: AnalyticsSetting, user_id: int = Dep
 @app.put("/analytics/settings/{setting_id}", response_model=AnalyticsSettingInDB)
 async def update_analytics_setting(setting_id: int, setting: AnalyticsSetting, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE analytics_settings SET category_id = , analytic_type = ? WHERE id = ?",
             (setting.category_id, setting.analytic_type, setting_id),
         )
@@ -771,7 +804,8 @@ async def update_analytics_setting(setting_id: int, setting: AnalyticsSetting, u
 @app.delete("/analytics/settings/{setting_id}")
 async def delete_analytics_setting(setting_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute("DELETE FROM analytics_settings WHERE id = ", (setting_id,))
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("DELETE FROM analytics_settings WHERE id = ", (setting_id,))
         return {"message": "Deleted"}
 
 
@@ -782,7 +816,8 @@ async def delete_analytics_setting(setting_id: int, user_id: int = Depends(get_c
 async def get_all_expense_categories(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         # SQLite не поддерживает NULLS FIRST, эквивалентная сортировка ниже
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT id, name, parent_id, is_active
             FROM expense_categories
@@ -800,15 +835,18 @@ async def create_expense_category(
     user_id: int = Depends(get_current_user_id),
 ):
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (, ?, 1)",
             (name, parent_id),
         )
         new_id = cursor.lastrowid
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (new_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row_to_dict(row)
 
 
@@ -820,21 +858,25 @@ async def update_expense_category(
     user_id: int = Depends(get_current_user_id),
 ):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE expense_categories SET name = , parent_id = ? WHERE id = ?",
             (name, parent_id, category_id),
         )
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (category_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row_to_dict(row)
 
 
 @app.delete("/categories/expense/{category_id}")
 async def archive_expense_category(category_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE expense_categories SET is_active = 0 WHERE id = ",
             (category_id,),
         )
@@ -854,7 +896,8 @@ async def get_all_unified_categories(user_id: int = Depends(get_current_user_id)
     """
     with db_session() as conn:
         # УБРАНА фильтрация по user_id
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT id, name, parent_id, is_active
             FROM expense_categories
@@ -877,7 +920,8 @@ async def create_unified_category(
     """
     with db_session() as conn:
         # 1. Создать в expense_categories
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (, , 1)",
             (name, parent_id),
         )
@@ -885,7 +929,8 @@ async def create_unified_category(
         
         # 2. Создать в income_categories (БЕЗ parent_id, если его нет в таблице)
         try:
-            conn.execute(
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute(
                 "INSERT INTO income_categories (name, is_active) VALUES (, 1)",
                 (name,),
             )
@@ -893,10 +938,12 @@ async def create_unified_category(
             print(f"Не удалось создать в income_categories: {e}")
         
         # 3. Вернуть созданную категорию из expense_categories
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (expense_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         
         return row_to_dict(row)
 
@@ -914,10 +961,12 @@ async def update_unified_category(
     """
     with db_session() as conn:
         # 1. Получить старое имя из expense_categories
-        old_row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT name FROM expense_categories WHERE id = ",
             (category_id,),
-        ).fetchone()
+        )
+        old_row = cursor.fetchone()
         
         if not old_row:
             raise HTTPException(status_code=404, detail="Category not found")
@@ -925,14 +974,16 @@ async def update_unified_category(
         old_name = old_row['name']
         
         # 2. Обновить в expense_categories по ID
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE expense_categories SET name = , parent_id = ? WHERE id = ?",
             (name, parent_id, category_id),
         )
         
         # 3. Обновить в income_categories по СТАРОМУ ИМЕНИ
         try:
-            conn.execute(
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute(
                 "UPDATE income_categories SET name =  WHERE name = ?",
                 (name, old_name),
             )
@@ -940,10 +991,12 @@ async def update_unified_category(
             print(f"Не удалось обновить в income_categories: {e}")
         
         # 4. Вернуть обновлённую категорию
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
             (category_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         
         return row_to_dict(row)
 
@@ -958,10 +1011,12 @@ async def archive_unified_category(
     """
     with db_session() as conn:
         # 1. Получить имя категории
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT name FROM expense_categories WHERE id = ",
             (category_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         
         if not row:
             raise HTTPException(status_code=404, detail="Category not found")
@@ -969,14 +1024,16 @@ async def archive_unified_category(
         category_name = row['name']
         
         # 2. Архивировать в expense_categories по ID
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE expense_categories SET is_active = 0 WHERE id = ",
             (category_id,),
         )
         
         # 3. Архивировать в income_categories по ИМЕНИ
         try:
-            conn.execute(
+            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cursor.execute(
                 "UPDATE income_categories SET is_active = 0 WHERE name = ",
                 (category_name,),
             )
@@ -993,7 +1050,8 @@ async def archive_unified_category(
 async def get_all_accounts(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         # УБРАНА фильтрация по user_id
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT id, name, type, is_active 
             FROM accounts
@@ -1012,15 +1070,18 @@ async def create_account(
     user_id: int = Depends(get_current_user_id),
 ):
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "INSERT INTO accounts (name, type, is_active) VALUES (, , 1)",
             (name, type),
         )
         new_id = cursor.lastrowid
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT id, name, type, is_active FROM accounts WHERE id = ",
             (new_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row_to_dict(row)
 
 
@@ -1032,21 +1093,25 @@ async def update_account(
     user_id: int = Depends(get_current_user_id),
 ):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE accounts SET name = , type = ? WHERE id = ?",
             (name, type, account_id),
         )
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT id, name, type, is_active FROM accounts WHERE id = ",
             (account_id,),
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row_to_dict(row)
 
 
 @app.delete("/accounts/{account_id}")
 async def archive_account(account_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE accounts SET is_active = 0 WHERE id = ",
             (account_id,),
         )
@@ -1072,7 +1137,8 @@ class AnalyticBlockInDB(AnalyticBlock):
 @app.get("/analytics/blocks", response_model=List[AnalyticBlockInDB])
 async def get_analytic_blocks(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM analytic_blocks WHERE is_active = 1 ORDER BY sort_order, name"
         )
         rows = cursor.fetchall()
@@ -1081,7 +1147,8 @@ async def get_analytic_blocks(user_id: int = Depends(get_current_user_id)):
 @app.post("/analytics/blocks", response_model=AnalyticBlockInDB)
 async def create_analytic_block(block: AnalyticBlock, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             INSERT INTO analytic_blocks 
              (code, name, icon, color, threshold_good, threshold_warning, sort_order, is_active) 
@@ -1091,9 +1158,11 @@ async def create_analytic_block(block: AnalyticBlock, user_id: int = Depends(get
              block.threshold_good, block.threshold_warning, block.sort_order),
         )
         new_id = cursor.lastrowid
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM analytic_blocks WHERE id = ", (new_id,)
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row_to_dict(row)
 
 @app.put("/analytics/blocks/{block_id}", response_model=AnalyticBlockInDB)
@@ -1102,7 +1171,8 @@ async def update_analytic_block(
     block: AnalyticBlock, 
     user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             UPDATE analytic_blocks 
              SET code = , name = ?, icon = ?, color = ?, 
@@ -1112,15 +1182,18 @@ async def update_analytic_block(
             (block.code, block.name, block.icon, block.color, 
              block.threshold_good, block.threshold_warning, block.sort_order, block_id),
         )
-        row = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "SELECT * FROM analytic_blocks WHERE id = ", (block_id,)
-        ).fetchone()
+        )
+        row = cursor.fetchone()
         return row_to_dict(row)
 
 @app.delete("/analytics/blocks/{block_id}")
 async def delete_analytic_block(block_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
-        conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             "UPDATE analytic_blocks SET is_active = 0 WHERE id = ", (block_id,)
         )
         return {"success": True}
@@ -1132,7 +1205,8 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
     """
     with db_session() as conn:
         # Получить сумму всех приходов на счёт
-        income_cursor = conn.execute("""
+        income_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        income_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
             WHERE type = 'income' AND account_id = 
@@ -1140,7 +1214,8 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         total_income = income_cursor.fetchone()[0]
         
         # Получить сумму всех расходов со счёта
-        expense_cursor = conn.execute("""
+        expense_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        expense_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
             WHERE type = 'expense' AND account_id = 
@@ -1148,7 +1223,8 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         total_expense = expense_cursor.fetchone()[0]
         
         # Получить входящие переводы (to_account_id)
-        transfer_in_cursor = conn.execute("""
+        transfer_in_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        transfer_in_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
             WHERE type IN ('transfer', 'incasation') AND to_account_id = 
@@ -1156,7 +1232,8 @@ async def get_account_balance(account_id: int, user_id: int = Depends(get_curren
         transfer_in = transfer_in_cursor.fetchone()[0]
         
         # Получить исходящие переводы (from_account_id)
-        transfer_out_cursor = conn.execute("""
+        transfer_out_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        transfer_out_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
             WHERE type IN ('transfer', 'incasation') AND from_account_id = 
@@ -1214,7 +1291,8 @@ async def get_account_movements(
         """
         
         params = (account_id, account_id, account_id, account_id) + date_params
-        cursor = conn.execute(query, params)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(query, params)
         
         operations = []
         for row in cursor.fetchall():
@@ -1286,7 +1364,8 @@ async def get_account_chart(
         """
         
         params = (account_id, account_id, account_id, account_id) + date_params
-        cursor = conn.execute(query, params)
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(query, params)
         
         # Группировка по дням
         daily_data = {}
@@ -1379,7 +1458,8 @@ async def startup_event():
 async def get_locations():
     """Получить список точек продаж"""
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT id, name, address, is_active 
             FROM locations 
@@ -1395,7 +1475,8 @@ async def get_locations():
 async def get_payment_methods():
     """Получить методы оплаты"""
     with db_session() as conn:
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT id, name, method_type, commission_percent, is_active 
             FROM payment_methods 
@@ -1417,13 +1498,15 @@ async def create_cashier_report(
     """
     with db_session() as conn:
         # Проверяем существование отчёта
-        existing = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             SELECT id FROM cashier_reports 
             WHERE report_date =  AND location_id = ?
             """,
             (report_data['report_date'], report_data['location_id'])
-        ).fetchone()
+        )
+        existing = cursor.fetchone()
 
         if existing:
             raise HTTPException(
@@ -1432,7 +1515,8 @@ async def create_cashier_report(
             )
 
         # Создаём отчёт
-        cursor = conn.execute(
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
             """
             INSERT INTO cashier_reports (
                 report_date, location_id, user_id, total_sales,
@@ -1453,16 +1537,19 @@ async def create_cashier_report(
         for payment in report_data.get('payments', []):
             if payment['amount'] > 0:
                 # Получаем процент комиссии
-                method = conn.execute(
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute(
                     "SELECT commission_percent FROM payment_methods WHERE id = ",
                     (payment['payment_method_id'],)
-                ).fetchone()
+                )
+                method = cursor.fetchone()
 
                 commission_percent = method['commission_percent'] if method else 0
                 commission_amount = payment['amount'] * commission_percent / 100
                 net_amount = payment['amount'] - commission_amount
 
-                conn.execute(
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute(
                     """
                     INSERT INTO cashier_report_payments (
                         report_id, payment_method_id, amount, 
@@ -1474,19 +1561,24 @@ async def create_cashier_report(
                 )
 
                 # Создаём income операцию в timeline (если метод не "наличные")
-                method_info = conn.execute(
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute(
                     "SELECT name, method_type FROM payment_methods WHERE id = ",
                     (payment['payment_method_id'],)
-                ).fetchone()
+                )
+                method_info = cursor.fetchone()
 
                 if method_info and method_info['method_type'] != 'cash':
                     # Находим категорию "Выручка" или создаём
-                    income_cat = conn.execute(
+                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cursor.execute(
                         "SELECT id FROM income_categories WHERE name = 'Выручка' LIMIT 1"
-                    ).fetchone()
+                    )
+                    income_cat = cursor.fetchone()
 
                     if not income_cat:
-                        cur = conn.execute(
+                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                        cur.execute(
                             "INSERT INTO income_categories (name, is_active) VALUES ('Выручка', 1)"
                         )
                         income_cat_id = cur.lastrowid
@@ -1494,14 +1586,17 @@ async def create_cashier_report(
                         income_cat_id = income_cat['id']
 
                     # Находим счёт или создаём по типу метода
-                    account = conn.execute(
+                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cursor.execute(
                         "SELECT id FROM accounts WHERE name LIKE  LIMIT 1",
                         (f"%{method_info['name']}%",)
-                    ).fetchone()
+                    )
+                    account = cursor.fetchone()
 
                     if not account:
                         # Создаём базовый банковский счёт
-                        cur = conn.execute(
+                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                        cur.execute(
                             "INSERT INTO accounts (name, type, account_type, is_active) VALUES (, 'bank', 'bank', 1)",
                             (method_info['name'],)
                         )
@@ -1510,7 +1605,8 @@ async def create_cashier_report(
                         account_id = account['id']
 
                     # Создаём income операцию
-                    conn.execute("""
+                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cursor.execute("""
                         INSERT INTO timeline (
                             date, type, category_id, account_id,
                             amount, description, user_id
@@ -1527,7 +1623,8 @@ async def create_cashier_report(
         # Добавляем расходы
         for expense in report_data.get('expenses', []):
             if expense['amount'] > 0:
-                conn.execute("""
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
                     INSERT INTO cashier_report_expenses (
                         report_id, category_id, amount, description
                     ) VALUES (, ?, ?, ?)
@@ -1536,12 +1633,15 @@ async def create_cashier_report(
 
                 # Создаём expense операцию в timeline
                 if expense.get('category_id'):
-                    cash_account = conn.execute(
+                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cursor.execute(
                         "SELECT id FROM accounts WHERE type = 'cash' LIMIT 1"
-                    ).fetchone()
+                    )
+                    cash_account = cursor.fetchone()
 
                     if cash_account:
-                        conn.execute("""
+                        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                        cursor.execute("""
                             INSERT INTO timeline (
                                 date, type, category_id, account_id,
                                 amount, description, user_id
@@ -1558,7 +1658,8 @@ async def create_cashier_report(
         # Добавляем прочие приходы
         for income in report_data.get('incomes', []):
             if income['amount'] > 0:
-                conn.execute("""
+                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cursor.execute("""
                     INSERT INTO cashier_report_income (
                         report_id, category_id, amount, description
                     ) VALUES (, ?, ?, ?)
@@ -1567,12 +1668,15 @@ async def create_cashier_report(
 
                 # Создаём income операцию в timeline
                 if income.get('category_id'):
-                    cash_account = conn.execute(
+                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cursor.execute(
                         "SELECT id FROM accounts WHERE type = 'cash' LIMIT 1"
-                    ).fetchone()
+                    )
+                    cash_account = cursor.fetchone()
 
                     if cash_account:
-                        conn.execute("""
+                        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                        cursor.execute("""
                             INSERT INTO timeline (
                                 date, type, category_id, account_id,
                                 amount, description, user_id
@@ -1625,7 +1729,9 @@ async def get_cashier_reports(
             params.append(location_id)
         query += " ORDER BY cr.report_date DESC, cr.created_at DESC"
 
-        reports = conn.execute(query, params).fetchall()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(query, params)
+        reports = cursor.fetchall()
         return [row_to_dict(r) for r in reports]
 
 
@@ -1636,7 +1742,8 @@ async def get_cashier_report_details(
 ):
     """Получить детали отчёта"""
     with db_session() as conn:
-        report = conn.execute("""
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
             SELECT 
                 cr.*,
                 l.name as location_name,
@@ -1646,14 +1753,16 @@ async def get_cashier_report_details(
             LEFT JOIN locations l ON cr.location_id = l.id
             LEFT JOIN users u ON cr.user_id = u.id
             WHERE cr.id = 
-        """, (report_id,)).fetchone()
+        """, (report_id,))
+        report = cursor.fetchone()
 
         if not report:
             raise HTTPException(status_code=404, detail="Отчёт не найден")
 
         result = row_to_dict(report)
 
-        payments = conn.execute("""
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
             SELECT 
                 crp.*,
                 pm.name as payment_method_name,
@@ -1661,27 +1770,32 @@ async def get_cashier_report_details(
             FROM cashier_report_payments crp
             LEFT JOIN payment_methods pm ON crp.payment_method_id = pm.id
             WHERE crp.report_id = 
-        """, (report_id,)).fetchall()
+        """, (report_id,))
+        payments = cursor.fetchall()
         result['payments'] = [row_to_dict(p) for p in payments]
 
-        expenses = conn.execute("""
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
             SELECT 
                 cre.*,
                 ec.name as category_name
             FROM cashier_report_expenses cre
             LEFT JOIN expense_categories ec ON cre.category_id = ec.id
             WHERE cre.report_id = 
-        """, (report_id,)).fetchall()
+        """, (report_id,))
+        expenses = cursor.fetchall()
         result['expenses'] = [row_to_dict(e) for e in expenses]
 
-        incomes = conn.execute("""
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute("""
             SELECT 
                 cri.*,
                 ic.name as category_name
             FROM cashier_report_income cri
             LEFT JOIN income_categories ic ON cri.category_id = ic.id
             WHERE cri.report_id = 
-        """, (report_id,)).fetchall()
+        """, (report_id,))
+        incomes = cursor.fetchall()
         result['incomes'] = [row_to_dict(i) for i in incomes]
 
         return result
