@@ -342,38 +342,38 @@ async def get_timeline(
     end_date: str = None,
     user_id: int = Depends(get_current_user_id),
 ):
-    with db_session() as conn:
-        if start_date and end_date:
-            cursor = conn.execute(
-                """
-                SELECT 
-                    t.*,
-                    u.full_name as created_by_name,
-                    u.username as created_by_username
-                FROM timeline t
-                LEFT JOIN users u ON t.user_id = u.id
-                WHERE t.date >=  AND t.date <= ?
-                ORDER BY t.date DESC, t.id DESC
-                LIMIT ?
-                """,
-                (start_date, end_date, limit),
-            )
-        else:
-            cursor = conn.execute(
-                """
-                SELECT 
-                    t.*,
-                    u.full_name as created_by_name,
-                    u.username as created_by_username
-                FROM timeline t
-                LEFT JOIN users u ON t.user_id = u.id
-                ORDER BY t.date DESC, t.id DESC
-                LIMIT 
-                """,
-                (limit,),
-            )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
+    if start_date and end_date:
+        rows = execute_query(
+            """
+            SELECT 
+                t.*,
+                u.full_name as created_by_name,
+                u.username as created_by_username
+            FROM timeline t
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE t.date BETWEEN %s AND %s
+            ORDER BY t.date DESC, t.id DESC
+            LIMIT %s
+            """,
+            params=(start_date, end_date, limit),
+            fetch_all=True,
+        )
+    else:
+        rows = execute_query(
+            """
+            SELECT 
+                t.*,
+                u.full_name as created_by_name,
+                u.username as created_by_username
+            FROM timeline t
+            LEFT JOIN users u ON t.user_id = u.id
+            ORDER BY t.date DESC, t.id DESC
+            LIMIT %s
+            """,
+            params=(limit,),
+            fetch_all=True,
+        )
+    return rows if rows else []
 
 
 @app.post("/operations/expense", response_model=TimelineItem)
@@ -637,34 +637,30 @@ async def delete_timeline_item(
 
 @app.get("/accounts")
 async def get_accounts(user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        # УБРАНА фильтрация по user_id
-        cursor = conn.execute(
-            """
-            SELECT *
-            FROM accounts
-            WHERE is_active = 1
-            ORDER BY name
-            """
-        )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
+    rows = execute_query(
+        """
+        SELECT *
+        FROM accounts
+        WHERE is_active = 1
+        ORDER BY name
+        """,
+        fetch_all=True,
+    )
+    return rows if rows else []
 
 
 @app.get("/categories/expense")
 async def get_expense_categories(user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        # УБРАНА фильтрация по user_id
-        cursor = conn.execute(
-            """
-            SELECT *
-            FROM expense_categories
-            WHERE is_active = 1
-            ORDER BY name
-            """
-        )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
+    rows = execute_query(
+        """
+        SELECT *
+        FROM expense_categories
+        WHERE is_active = 1
+        ORDER BY parent_id, name
+        """,
+        fetch_all=True,
+    )
+    return rows if rows else []
 
 
 @app.get("/categories/income")
