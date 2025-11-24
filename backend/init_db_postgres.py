@@ -114,6 +114,19 @@ def init_database():
     ''')
     print("✅ Table 'payment_methods' created/verified")
     
+    # Таблица для аналитических блоков
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS analytic_blocks (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            category_ids TEXT,
+            is_active INTEGER DEFAULT 1,
+            display_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    print("✅ Table 'analytic_blocks' created/verified")
+    
     # Создаём таблицу cashier_reports
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cashier_reports (
