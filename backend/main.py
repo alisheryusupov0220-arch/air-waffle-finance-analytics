@@ -12,10 +12,7 @@ from typing import Optional, List
 from datetime import datetime, date
 from pydantic import BaseModel, Field
 
-# НЕ ИМПОРТИРУЕМ sqlite3! (PostgreSQL-only)
-
-from auth import get_current_user_id
-# Database helpers
+# --- Импорты Helpers (из core_endpoints инструкции) ---
 from database import (
     execute_query,
     execute_insert,
@@ -24,11 +21,15 @@ from database import (
     get_one,
     get_all,
 )
+from auth import get_current_user_id
 
 # --- Импорты из analytics.py ---
 from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
 # -----------------------------
 
+# ============================================
+# DATABASE CONFIGURATION
+# ============================================
 
 def get_db_connection():
     """Подключение к Supabase PostgreSQL"""
@@ -50,13 +51,7 @@ def get_db_connection():
 def db_session():
     """
     Context manager для работы с PostgreSQL базой данных.
-    Возвращает подключение с автоматическим commit/rollback.
-    
-    Использование:
-        with db_session() as conn:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute("SELECT * FROM users")
-            result = cursor.fetchall()
+    Нужен для старых эндпоинтов (Timeline, Analytics), которые еще не переведены на helpers.
     """
     conn = get_db_connection()
     try:
@@ -69,44 +64,46 @@ def db_session():
     finally:
         conn.close()
 
-def execute_query(query, params=None, fetch_one=False, fetch_all=False):
-    """Выполнить SQL запрос в PostgreSQL"""
-    import psycopg2.extras
-    
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
-    try:
-        # PostgreSQL использует %s вместо ?
-        pg_query = query.replace('?', '%s')
-        
-        if params:
-            cursor.execute(pg_query, params)
-        else:
-            cursor.execute(pg_query)
-        
-        if fetch_one:
-            result = cursor.fetchone()
-        elif fetch_all:
-            result = cursor.fetchall()
-        else:
-            result = None
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return result
-        
-    except Exception as e:
-        conn.rollback()
-        cursor.close()
-        conn.close()
-        print(f"SQL Error: {e}")
-        print(f"Query: {pg_query}")
-        raise e
 
+# ============================================
+# PYDANTIC MODELS (OLD + NEW merged)
+# ============================================
 
+# --- New Models from core_endpoints.py ---
+class TelegramAuth(BaseModel):
+    telegram_id: int
+
+class UserCreate(BaseModel):
+    telegram_id: int
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    role: str = 'cashier'
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class AccountCreate(BaseModel):
+    name: str
+    type: str  # 'cash', 'bank', 'card'
+    currency: str = 'UZS'
+    initial_balance: float = 0
+
+class AccountUpdate(BaseModel):
+    name: Optional[str] = None
+    type: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class ExpenseCategoryCreate(BaseModel):
+    name: str
+    parent_id: Optional[int] = None
+
+class IncomeCategoryCreate(BaseModel):
+    name: str
+
+# --- Old Models (Still needed for Timeline/Operations) ---
 class TimelineItem(BaseModel):
     id: int
     date: str
@@ -120,9 +117,8 @@ class TimelineItem(BaseModel):
     from_account_id: Optional[int] = None
     to_account_id: Optional[int] = None
     commission_amount: Optional[float] = None
-    created_by_name: Optional[str] = None  # Имя создателя
+    created_by_name: Optional[str] = None
     created_by_username: Optional[str] = None 
-
 
 class OperationBase(BaseModel):
     date: str = Field(default_factory=lambda: date.today().isoformat())
@@ -131,14 +127,11 @@ class OperationBase(BaseModel):
     amount: float = Field(gt=0)
     description: Optional[str] = None
 
-
 class ExpenseCreate(OperationBase):
     category_id: int
 
-
 class IncomeCreate(OperationBase):
     category_id: int
-
 
 class IncasationCreate(BaseModel):
     date: str = Field(default_factory=lambda: date.today().isoformat())
@@ -146,7 +139,6 @@ class IncasationCreate(BaseModel):
     to_account_id: int
     amount: float = Field(gt=0)
     description: Optional[str] = None
-
 
 class TransferCreate(BaseModel):
     date: str = Field(default_factory=lambda: date.today().isoformat())
@@ -156,32 +148,30 @@ class TransferCreate(BaseModel):
     commission_amount: float = Field(default=0, ge=0)
     description: Optional[str] = None
 
-
-# Analytics settings models
 class AnalyticsSetting(BaseModel):
     category_id: int
-    analytic_type: str  # e.g., 'food_cost', 'labor_cost'
-
+    analytic_type: str
 
 class AnalyticsSettingInDB(AnalyticsSetting):
     id: int
 
+class AnalyticBlock(BaseModel):
+    code: str
+    name: str
+    icon: str = '📊'
+    color: str = 'blue'
+    threshold_good: float = 25.0
+    threshold_warning: float = 35.0
+    sort_order: int = 0
 
-class TelegramAuthRequest(BaseModel):
-    telegram_id: str
-    username: Optional[str] = None
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-
-
-class UserResponse(BaseModel):
+class AnalyticBlockInDB(AnalyticBlock):
     id: int
-    telegram_id: int
-    username: Optional[str] = None
-    full_name: Optional[str] = None
-    role: Optional[str] = "owner"  # По умолчанию owner
-    is_active: int = 1
+    is_active: int
 
+
+# ============================================
+# APP CONFIGURATION
+# ============================================
 
 app = FastAPI(title="Air Waffle Finance API")
 
@@ -201,155 +191,518 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 def row_to_dict(row) -> dict:
     return {key: row[key] for key in row.keys()}
 
 
-@app.post("/auth/verify")
-async def verify_user(request: dict):
-    """Регистрация/вход через Telegram ID"""
-    try:
-        telegram_id = request.get('telegram_id')
-        
-        if not telegram_id:
-            raise HTTPException(status_code=400, detail="telegram_id is required")
-        
-        # Проверяем существует ли пользователь
-        user = execute_query(
-            "SELECT * FROM users WHERE telegram_id = %s",
-            (telegram_id,),
-            fetch_one=True
-        )
-        
-        if user:
-            return dict(user)
-        
-        # Создаём нового пользователя
-        username = request.get('username', '')
-        first_name = request.get('first_name', '')
-        last_name = request.get('last_name', '')
-        full_name = f"{first_name} {last_name}".strip() or username or f"User_{telegram_id}"
-        
-        execute_query(
-            """INSERT INTO users (telegram_id, username, full_name, role, is_active)
-               VALUES (%s, %s, %s, 'owner', 1)""",
-            (telegram_id, username, full_name)
-        )
-        
-        # Получаем созданного пользователя
-        new_user = execute_query(
-            "SELECT * FROM users WHERE telegram_id = %s",
-            (telegram_id,),
-            fetch_one=True
-        )
-        
-        return dict(new_user)
-        
-    except Exception as e:
-        print(f"Auth error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# ============================================
+# 1. AUTH ENDPOINTS (UPDATED)
+# ============================================
 
+@app.post("/auth/verify")
+async def verify_telegram_user(auth_data: TelegramAuth):
+    """
+    Проверить/создать пользователя через Telegram ID
+    """
+    telegram_id = auth_data.telegram_id
+    
+    # Проверить существует ли пользователь
+    user = get_one('users', 'telegram_id = %s', (telegram_id,))
+    
+    if user:
+        # Пользователь существует
+        return {
+            "id": user['id'],
+            "telegram_id": user['telegram_id'],
+            "username": user['username'],
+            "full_name": user['full_name'],
+            "role": user['role'],
+            "is_active": user['is_active']
+        }
+    else:
+        # Создать нового пользователя
+        new_user_id = execute_insert('users', {
+            'telegram_id': telegram_id,
+            'username': None,
+            'full_name': f"User {telegram_id}",
+            'role': 'cashier',
+            'is_active': True
+        })
+        
+        # Вернуть созданного пользователя
+        new_user = get_one('users', 'id = %s', (new_user_id,))
+        
+        return {
+            "id": new_user['id'],
+            "telegram_id": new_user['telegram_id'],
+            "username": new_user['username'],
+            "full_name": new_user['full_name'],
+            "role": new_user['role'],
+            "is_active": new_user['is_active']
+        }
+
+
+# ============================================
+# 2. USERS ENDPOINTS (UPDATED)
+# ============================================
 
 @app.get("/users")
-async def get_all_users(current_user_id: int = Depends(get_current_user_id)):
-    """Получить список всех пользователей (только для owner/manager)"""
-    with db_session() as conn:
-        # Проверяем роль текущего пользователя
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT role FROM users WHERE id = ",
-            (current_user_id,)
-        )
-        current_user = cursor.fetchone()
-
-        if not current_user or current_user['role'] not in ['owner', 'manager']:
-            raise HTTPException(status_code=403, detail="Access denied. Owner or Manager role required")
-
-        # Получаем всех пользователей
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("""
-            SELECT 
-                id,
-                telegram_id,
-                username,
-                full_name,
-                role,
-                is_active,
-                created_at
-            FROM users
-            ORDER BY created_at DESC
-        """
-        )
-        users = cursor.fetchall()
-
-        return [row_to_dict(user) for user in users]
+async def get_all_users(
+    user_id: int = Depends(get_current_user_id),
+    is_active: Optional[bool] = None
+):
+    """Получить список всех пользователей"""
+    # Проверить роль текущего пользователя
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if not current_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Получить пользователей
+    if is_active is not None:
+        users = get_all('users', 'is_active = %s', (is_active,), order_by='created_at DESC')
+    else:
+        users = get_all('users', order_by='created_at DESC')
+    
+    return users
 
 
-@app.put("/users/{user_id}/role")
-async def update_user_role(
-    user_id: int,
-    role: str,
+@app.get("/users/me")
+async def get_current_user(user_id: int = Depends(get_current_user_id)):
+    """Получить данные текущего пользователя"""
+    user = get_one('users', 'id = %s', (user_id,))
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return user
+
+
+@app.post("/users")
+async def create_user(
+    user_data: UserCreate,
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """Изменить роль пользователя (только owner)"""
-    if role not in ['owner', 'manager', 'accountant', 'cashier']:
-        raise HTTPException(status_code=400, detail="Invalid role")
+    """Создать нового пользователя"""
+    # Проверить права
+    current_user = get_one('users', 'id = %s', (current_user_id,))
+    
+    if current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Only owner can create users")
+    
+    # Проверить что telegram_id уникален
+    existing = get_one('users', 'telegram_id = %s', (user_data.telegram_id,))
+    if existing:
+        raise HTTPException(status_code=400, detail="User with this telegram_id already exists")
+    
+    # Создать пользователя
+    new_user_id = execute_insert('users', {
+        'telegram_id': user_data.telegram_id,
+        'username': user_data.username,
+        'full_name': user_data.full_name,
+        'role': user_data.role,
+        'is_active': True
+    })
+    
+    # Вернуть созданного пользователя
+    new_user = get_one('users', 'id = %s', (new_user_id,))
+    return new_user
 
-    with db_session() as conn:
-        # Проверяем что текущий пользователь - owner
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT role FROM users WHERE id = ",
-            (current_user_id,)
-        )
-        current_user = cursor.fetchone()
 
-        if not current_user or current_user['role'] != 'owner':
-            raise HTTPException(status_code=403, detail="Access denied. Owner role required")
-
-        # Обновляем роль
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE users SET role =  WHERE id = ",
-            (role, user_id)
-        )
-
-        return {"success": True, "message": "Role updated"}
-
-
-@app.put("/users/{user_id}/status")
-async def toggle_user_status(
+@app.put("/users/{user_id}")
+async def update_user(
     user_id: int,
-    is_active: bool,
+    user_data: UserUpdate,
     current_user_id: int = Depends(get_current_user_id)
 ):
-    """Активировать/деактивировать пользователя (только owner)"""
+    """Обновить пользователя"""
+    current_user = get_one('users', 'id = %s', (current_user_id,))
+    target_user = get_one('users', 'id = %s', (user_id,))
+    
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Проверка прав
+    if current_user['role'] == 'owner':
+        pass
+    elif current_user['role'] == 'manager':
+        if target_user['role'] != 'cashier':
+            raise HTTPException(status_code=403, detail="Manager can only update cashiers")
+    else:
+        if current_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Can only update yourself")
+        if user_data.role is not None:
+            raise HTTPException(status_code=403, detail="Cannot change own role")
+    
+    # Подготовить данные для обновления
+    update_data = {}
+    if user_data.username is not None:
+        update_data['username'] = user_data.username
+    if user_data.full_name is not None:
+        update_data['full_name'] = user_data.full_name
+    if user_data.role is not None:
+        update_data['role'] = user_data.role
+    if user_data.is_active is not None:
+        update_data['is_active'] = user_data.is_active
+    
+    execute_update('users', update_data, 'id = %s', (user_id,))
+    updated_user = get_one('users', 'id = %s', (user_id,))
+    return updated_user
+
+
+@app.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    current_user_id: int = Depends(get_current_user_id)
+):
+    """Удалить пользователя (soft delete)"""
+    current_user = get_one('users', 'id = %s', (current_user_id,))
+    
+    if current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Only owner can delete users")
+    
+    target_user = get_one('users', 'id = %s', (user_id,))
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if current_user_id == user_id:
+        raise HTTPException(status_code=400, detail="Cannot delete yourself")
+    
+    execute_update('users', {'is_active': False}, 'id = %s', (user_id,))
+    return {"message": "User deactivated successfully"}
+
+
+# ============================================
+# 3. ACCOUNTS ENDPOINTS (UPDATED)
+# ============================================
+
+@app.get("/accounts")
+async def get_accounts(user_id: int = Depends(get_current_user_id)):
+    """Получить список всех активных счетов"""
+    accounts = get_all('accounts', 'is_active = %s', (True,), order_by='name')
+    return accounts
+
+
+@app.get("/accounts/{account_id}")
+async def get_account(
+    account_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Получить один счёт по ID"""
+    account = get_one('accounts', 'id = %s AND is_active = %s', (account_id, True))
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return account
+
+
+@app.post("/accounts")
+async def create_account(
+    account_data: AccountCreate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Создать новый счёт"""
+    current_user = get_one('users', 'id = %s', (user_id,))
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if account_data.type not in ['cash', 'bank', 'card']:
+        raise HTTPException(status_code=400, detail="Invalid account type")
+    
+    new_account_id = execute_insert('accounts', {
+        'name': account_data.name,
+        'type': account_data.type,
+        'currency': account_data.currency,
+        'initial_balance': account_data.initial_balance,
+        'current_balance': account_data.initial_balance,
+        'is_active': True
+    })
+    
+    new_account = get_one('accounts', 'id = %s', (new_account_id,))
+    return new_account
+
+
+@app.put("/accounts/{account_id}")
+async def update_account(
+    account_id: int,
+    account_data: AccountUpdate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Обновить счёт"""
+    current_user = get_one('users', 'id = %s', (user_id,))
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    account = get_one('accounts', 'id = %s', (account_id,))
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    update_data = {}
+    if account_data.name is not None:
+        update_data['name'] = account_data.name
+    if account_data.type is not None:
+        if account_data.type not in ['cash', 'bank', 'card']:
+            raise HTTPException(status_code=400, detail="Invalid account type")
+        update_data['type'] = account_data.type
+    if account_data.is_active is not None:
+        update_data['is_active'] = account_data.is_active
+    
+    execute_update('accounts', update_data, 'id = %s', (account_id,))
+    updated_account = get_one('accounts', 'id = %s', (account_id,))
+    return updated_account
+
+
+@app.delete("/accounts/{account_id}")
+async def delete_account(
+    account_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Удалить счёт (soft delete)"""
+    current_user = get_one('users', 'id = %s', (user_id,))
+    if current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Only owner can delete accounts")
+    
+    account = get_one('accounts', 'id = %s', (account_id,))
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    
+    execute_update('accounts', {'is_active': False}, 'id = %s', (account_id,))
+    return {"message": "Account deleted successfully"}
+
+
+# ============================================
+# 4. EXPENSE CATEGORIES ENDPOINTS (UPDATED)
+# ============================================
+
+@app.get("/categories/expense")
+async def get_expense_categories(user_id: int = Depends(get_current_user_id)):
+    """Получить все категории расходов с иерархией"""
+    categories = get_all(
+        'expense_categories',
+        'is_active = %s',
+        (True,),
+        order_by='parent_id NULLS FIRST, name'
+    )
+    return categories
+
+
+@app.post("/categories/expense")
+async def create_expense_category(
+    category_data: ExpenseCategoryCreate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Создать категорию расходов"""
+    current_user = get_one('users', 'id = %s', (user_id,))
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if category_data.parent_id is not None:
+        parent = get_one('expense_categories', 'id = %s', (category_data.parent_id,))
+        if not parent:
+            raise HTTPException(status_code=404, detail="Parent category not found")
+    
+    new_category_id = execute_insert('expense_categories', {
+        'name': category_data.name,
+        'parent_id': category_data.parent_id,
+        'is_active': True
+    })
+    
+    new_category = get_one('expense_categories', 'id = %s', (new_category_id,))
+    return new_category
+
+
+@app.put("/categories/expense/{category_id}")
+async def update_expense_category(
+    category_id: int,
+    name: str = Body(...),
+    parent_id: Optional[int] = Body(None),
+    user_id: int = Depends(get_current_user_id),
+):
     with db_session() as conn:
-        # Проверяем что текущий пользователь - owner
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "SELECT role FROM users WHERE id = ",
-            (current_user_id,)
+            "UPDATE expense_categories SET name = %s, parent_id = %s WHERE id = %s",
+            (name, parent_id, category_id),
         )
-        current_user = cursor.fetchone()
-
-        if not current_user or current_user['role'] != 'owner':
-            raise HTTPException(status_code=403, detail="Access denied. Owner role required")
-
-        # Проверяем что не деактивируем самого себя
-        if user_id == current_user_id and not is_active:
-            raise HTTPException(status_code=400, detail="Cannot deactivate yourself")
-
-        # Обновляем статус
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "UPDATE users SET is_active =  WHERE id = ?",
-            (1 if is_active else 0, user_id)
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = %s",
+            (category_id,),
         )
+        row = cursor.fetchone()
+        return row_to_dict(row)
 
-        return {"success": True, "message": "Status updated"}
 
+@app.delete("/categories/expense/{category_id}")
+async def archive_expense_category(category_id: int, user_id: int = Depends(get_current_user_id)):
+    with db_session() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            "UPDATE expense_categories SET is_active = 0 WHERE id = %s",
+            (category_id,),
+        )
+        return {"success": True}
+
+
+# ============================================
+# 5. INCOME CATEGORIES ENDPOINTS (UPDATED)
+# ============================================
+
+@app.get("/categories/income")
+async def get_income_categories(user_id: int = Depends(get_current_user_id)):
+    """Получить все категории доходов"""
+    categories = get_all(
+        'income_categories',
+        'is_active = %s',
+        (True,),
+        order_by='name'
+    )
+    return categories
+
+
+@app.post("/categories/income")
+async def create_income_category(
+    category_data: IncomeCategoryCreate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Создать категорию доходов"""
+    current_user = get_one('users', 'id = %s', (user_id,))
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    new_category_id = execute_insert('income_categories', {
+        'name': category_data.name,
+        'is_active': True
+    })
+    
+    new_category = get_one('income_categories', 'id = %s', (new_category_id,))
+    return new_category
+
+
+# ============================================
+# UNIFIED CATEGORIES (NEW from core_endpoints context)
+# ============================================
+
+@app.get("/categories/unified/all")
+async def get_all_unified_categories(user_id: int = Depends(get_current_user_id)):
+    """Получить ОБЪЕДИНЁННЫЙ список наименований"""
+    categories = get_all(
+        'expense_categories',
+        'is_active = %s',
+        (True,),
+        order_by='parent_id NULLS FIRST, name'
+    )
+    return categories
+
+
+@app.post("/categories/unified")
+async def create_unified_category(
+    name: str = Body(...),
+    parent_id: Optional[int] = Body(None),
+    user_id: int = Depends(get_current_user_id),
+):
+    """Создать наименование в ОБЕИХ таблицах одновременно"""
+    with db_session() as conn:
+        # 1. Создать в expense_categories
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (%s, %s, 1)",
+            (name, parent_id),
+        )
+        expense_id = cursor.lastrowid
+        
+        # 2. Создать в income_categories (БЕЗ parent_id)
+        try:
+            cursor.execute(
+                "INSERT INTO income_categories (name, is_active) VALUES (%s, 1)",
+                (name,),
+            )
+        except Exception as e:
+            print(f"Не удалось создать в income_categories: {e}")
+        
+        # 3. Вернуть созданную категорию
+        cursor.execute(
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = %s",
+            (expense_id,),
+        )
+        row = cursor.fetchone()
+        return row_to_dict(row)
+
+
+@app.put("/categories/unified/{category_id}")
+async def update_unified_category(
+    category_id: int,
+    name: str = Body(...),
+    parent_id: Optional[int] = Body(None),
+    user_id: int = Depends(get_current_user_id),
+):
+    with db_session() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            "SELECT name FROM expense_categories WHERE id = %s",
+            (category_id,),
+        )
+        old_row = cursor.fetchone()
+        if not old_row:
+            raise HTTPException(status_code=404, detail="Category not found")
+        old_name = old_row['name']
+        
+        cursor.execute(
+            "UPDATE expense_categories SET name = %s, parent_id = %s WHERE id = %s",
+            (name, parent_id, category_id),
+        )
+        try:
+            cursor.execute(
+                "UPDATE income_categories SET name = %s WHERE name = %s",
+                (name, old_name),
+            )
+        except Exception as e:
+            print(f"Не удалось обновить в income_categories: {e}")
+        
+        cursor.execute(
+            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = %s",
+            (category_id,),
+        )
+        row = cursor.fetchone()
+        return row_to_dict(row)
+
+
+@app.delete("/categories/unified/{category_id}")
+async def archive_unified_category(
+    category_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    with db_session() as conn:
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(
+            "SELECT name FROM expense_categories WHERE id = %s",
+            (category_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Category not found")
+        category_name = row['name']
+        
+        cursor.execute(
+            "UPDATE expense_categories SET is_active = 0 WHERE id = %s",
+            (category_id,),
+        )
+        try:
+            cursor.execute(
+                "UPDATE income_categories SET is_active = 0 WHERE name = %s",
+                (category_name,),
+            )
+        except Exception as e:
+            print(f"Не удалось архивировать в income_categories: {e}")
+        
+        return {"success": True, "message": f"Archived '{category_name}' in both tables"}
+
+
+# ============================================
+# LEGACY ENDPOINTS (TIMELINE, OPERATIONS, ETC)
+# ============================================
 
 @app.get("/timeline", response_model=List[TimelineItem])
 async def get_timeline(
@@ -397,42 +750,19 @@ async def create_expense(
     payload: ExpenseCreate,
     user_id: int = Depends(get_current_user_id),
 ):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Попытка создать expense:", payload.dict())
-    # -----------------------
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
             INSERT INTO timeline (
-                date,
-                type,
-                category_id,
-                amount,
-                account_id,
-                description,
-                source,
-                user_id
-            )
-            VALUES (, 'expense', ?, ?, ?, ?, 'miniapp', ?)
+                date, type, category_id, amount, account_id, description, source, user_id
+            ) VALUES (%s, 'expense', %s, %s, %s, %s, 'miniapp', %s)
             """,
-            (
-                str(payload.date),
-                payload.category_id,
-                payload.amount,
-                payload.account_id,
-                payload.description,
-                user_id,
-            ),
+            (str(payload.date), payload.category_id, payload.amount, payload.account_id, payload.description, user_id),
         )
         timeline_id = cursor.lastrowid
-        # --- PRINT ДЛЯ ДЕБАГА ---
-        print("Создано expense ID:", timeline_id)
-        # -----------------------
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        )
+        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create expense")
@@ -444,42 +774,19 @@ async def create_income(
     payload: IncomeCreate,
     user_id: int = Depends(get_current_user_id),
 ):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Попытка создать income:", payload.dict())
-    # -----------------------
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
             INSERT INTO timeline (
-                date,
-                type,
-                category_id,
-                amount,
-                account_id,
-                description,
-                source,
-                user_id
-            )
-            VALUES (, 'income', ?, ?, ?, ?, 'miniapp', ?)
+                date, type, category_id, amount, account_id, description, source, user_id
+            ) VALUES (%s, 'income', %s, %s, %s, %s, 'miniapp', %s)
             """,
-            (
-                str(payload.date),
-                payload.category_id,
-                payload.amount,
-                payload.account_id,
-                payload.description,
-                user_id,
-            ),
+            (str(payload.date), payload.category_id, payload.amount, payload.account_id, payload.description, user_id),
         )
         timeline_id = cursor.lastrowid
-        # --- PRINT ДЛЯ ДЕБАГА ---
-        print("Создано income ID:", timeline_id)
-        # -----------------------
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        )
+        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
         row = cursor.fetchone()
         if not row:
             raise HTTPException(status_code=500, detail="Failed to create income")
@@ -491,47 +798,22 @@ async def create_incasation(
     payload: IncasationCreate,
     user_id: int = Depends(get_current_user_id),
 ):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Попытка создать incasation:", payload.dict())
-    # -----------------------
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
             INSERT INTO timeline (
-                date,
-                type,
-                amount,
-                description,
-                source,
-                user_id,
-                from_account_id,
-                to_account_id
-            )
-            VALUES (, 'incasation', ?, ?, 'miniapp', ?, ?, ?)
+                date, type, amount, description, source, user_id, from_account_id, to_account_id
+            ) VALUES (%s, 'incasation', %s, %s, 'miniapp', %s, %s, %s)
             """,
-            (
-                str(payload.date),
-                payload.amount,
-                payload.description,
-                user_id,
-                payload.from_account_id,
-                payload.to_account_id,
-            ),
+            (str(payload.date), payload.amount, payload.description, user_id, payload.from_account_id, payload.to_account_id),
         )
         timeline_id = cursor.lastrowid
-        # --- PRINT ДЛЯ ДЕБАГА ---
-        print("Создано incasation ID:", timeline_id)
-        # -----------------------
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        )
+        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
         row = cursor.fetchone()
         if not row:
-            raise HTTPException(
-                status_code=500, detail="Failed to create incasation record"
-            )
+            raise HTTPException(status_code=500, detail="Failed to create incasation record")
         return row_to_dict(row)
 
 
@@ -540,49 +822,22 @@ async def create_transfer(
     payload: TransferCreate,
     user_id: int = Depends(get_current_user_id),
 ):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Попытка создать transfer:", payload.dict())
-    # -----------------------
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
             INSERT INTO timeline (
-                date,
-                type,
-                amount,
-                description,
-                source,
-                user_id,
-                from_account_id,
-                to_account_id,
-                commission_amount
-            )
-            VALUES (, 'transfer', ?, ?, 'miniapp', ?, ?, ?, ?)
+                date, type, amount, description, source, user_id, from_account_id, to_account_id, commission_amount
+            ) VALUES (%s, 'transfer', %s, %s, 'miniapp', %s, %s, %s, %s)
             """,
-            (
-                str(payload.date),
-                payload.amount,
-                payload.description,
-                user_id,
-                payload.from_account_id,
-                payload.to_account_id,
-                payload.commission_amount,
-            ),
+            (str(payload.date), payload.amount, payload.description, user_id, payload.from_account_id, payload.to_account_id, payload.commission_amount),
         )
         timeline_id = cursor.lastrowid
-        # --- PRINT ДЛЯ ДЕБАГА ---
-        print("Создано transfer ID:", timeline_id)
-        # -----------------------
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT * FROM timeline WHERE id = ", (timeline_id,)
-        )
+        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
         row = cursor.fetchone()
         if not row:
-            raise HTTPException(
-                status_code=500, detail="Failed to create transfer record"
-            )
+            raise HTTPException(status_code=500, detail="Failed to create transfer record")
         return row_to_dict(row)
 
 
@@ -593,52 +848,30 @@ async def update_timeline_item(
     user_id: int = Depends(get_current_user_id),
 ):
     with db_session() as conn:
-        # ПРОВЕРКА: может ли пользователь редактировать эту операцию
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT user_id FROM timeline WHERE id = ",
-            (timeline_id,)
-        )
+        cursor.execute("SELECT user_id FROM timeline WHERE id = %s", (timeline_id,))
         check = cursor.fetchone()
         
         if not check:
             raise HTTPException(status_code=404, detail="Operation not found")
-        
         if check['user_id'] != user_id:
-            raise HTTPException(
-                status_code=403, 
-                detail="You can only edit your own operations"
-            )
+            raise HTTPException(status_code=403, detail="You can only edit your own operations")
         
-        # Обновляем операцию
-        set_clause = ", ".join([f"{k} = ?" for k in payload.keys()])
+        set_clause = ", ".join([f"{k} = %s" for k in payload.keys()])
         values = list(payload.values()) + [timeline_id]
         
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            f"UPDATE timeline SET {set_clause} WHERE id = ?",
-            values
-        )
-        
-        # Возвращаем обновленную операцию с информацией о создателе
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cursor.execute(f"UPDATE timeline SET {set_clause} WHERE id = %s", values)
         cursor.execute(
             """
-            SELECT 
-                t.*,
-                u.full_name as created_by_name,
-                u.username as created_by_username
-            FROM timeline t
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE t.id = 
+            SELECT t.*, u.full_name as created_by_name, u.username as created_by_username
+            FROM timeline t LEFT JOIN users u ON t.user_id = u.id
+            WHERE t.id = %s
             """,
             (timeline_id,)
         )
         row = cursor.fetchone()
-        
         if not row:
             raise HTTPException(status_code=500, detail="Failed to update operation")
-        
         return row_to_dict(row)
 
 
@@ -648,70 +881,20 @@ async def delete_timeline_item(
     user_id: int = Depends(get_current_user_id)
 ):
     with db_session() as conn:
-        # ПРОВЕРКА: может ли пользователь удалить эту операцию
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT user_id FROM timeline WHERE id = ",
-            (timeline_id,)
-        )
+        cursor.execute("SELECT user_id FROM timeline WHERE id = %s", (timeline_id,))
         check = cursor.fetchone()
-        
         if not check:
             raise HTTPException(status_code=404, detail="Operation not found")
-        
         if check['user_id'] != user_id:
-            raise HTTPException(
-                status_code=403,
-                detail="You can only delete your own operations"
-            )
-        
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("DELETE FROM timeline WHERE id = ", (timeline_id,))
+            raise HTTPException(status_code=403, detail="You can only delete your own operations")
+        cursor.execute("DELETE FROM timeline WHERE id = %s", (timeline_id,))
         return {"success": True}
 
 
-@app.get("/accounts")
-async def get_accounts(user_id: int = Depends(get_current_user_id)):
-    rows = execute_query(
-        """
-        SELECT *
-        FROM accounts
-        WHERE is_active = 1
-        ORDER BY name
-        """,
-        fetch_all=True,
-    )
-    return rows if rows else []
-
-
-@app.get("/categories/expense")
-async def get_expense_categories(user_id: int = Depends(get_current_user_id)):
-    rows = execute_query(
-        """
-        SELECT *
-        FROM expense_categories
-        WHERE is_active = 1
-        ORDER BY parent_id, name
-        """,
-        fetch_all=True,
-    )
-    return rows if rows else []
-
-
-@app.get("/categories/income")
-async def get_income_categories(user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            SELECT *
-            FROM income_categories
-            ORDER BY name
-            """
-        )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
-
+# ==============================
+# ANALYTICS ENDPOINTS
+# ==============================
 
 @app.get("/analytics/dashboard")
 async def get_dashboard(
@@ -720,13 +903,9 @@ async def get_dashboard(
     end_date: str = None,
     user_id: int = Depends(get_current_user_id),
 ):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Запрос dashboard: days=", days, "start=", start_date, "end=", end_date)
-    # -----------------------
     result = dashboard(days=days, start_date=start_date, end_date=end_date)
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Результат dashboard:", result)
-    # -----------------------
     return result
 
 
@@ -738,25 +917,17 @@ async def get_pivot(
     group_by: str = 'month',
     user_id: int = Depends(get_current_user_id),
 ):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Запрос pivot: days=", days, "start=", start_date, "end=", end_date, "group_by=", group_by)
-    # -----------------------
     result = pivot_table(days=days, start_date=start_date, end_date=end_date, group_by=group_by)
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print("Результат pivot:", result)
-    # -----------------------
     return result
 
 
 @app.get("/analytics/trend")
 async def trend_data(days: int = 30, user_id: int = Depends(get_current_user_id)):
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print(f"Запрос trend: days={days}")
-    # -----------------------
     result = get_trend_data(days)
-    # --- PRINT ДЛЯ ДЕБАГА ---
     print(f"Результат trend (count): {len(result)}")
-    # -----------------------
     return result
 
 
@@ -767,17 +938,11 @@ async def get_cell_details_endpoint(
     group_by: str = 'month',
     user_id: int = Depends(get_current_user_id),
 ):
-    """
-    Получить детали операций для конкретной ячейки таблицы
-    """
     result = get_cell_details(period, category_name, group_by)
     print(f"Cell details for {period}/{category_name}: {len(result)} operations")
     return result
 
 
-# ==============================
-# Analytics settings (mapping категорий к типам аналитики)
-# ==============================
 @app.get("/analytics/settings", response_model=List[AnalyticsSettingInDB])
 async def get_analytics_settings(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
@@ -792,7 +957,7 @@ async def create_analytics_setting(setting: AnalyticsSetting, user_id: int = Dep
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "INSERT INTO analytics_settings (category_id, analytic_type) VALUES (, )",
+            "INSERT INTO analytics_settings (category_id, analytic_type) VALUES (%s, %s)",
             (setting.category_id, setting.analytic_type),
         )
         new_id = cursor.lastrowid
@@ -804,7 +969,7 @@ async def update_analytics_setting(setting_id: int, setting: AnalyticsSetting, u
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "UPDATE analytics_settings SET category_id = , analytic_type = ? WHERE id = ?",
+            "UPDATE analytics_settings SET category_id = %s, analytic_type = %s WHERE id = %s",
             (setting.category_id, setting.analytic_type, setting_id),
         )
         return AnalyticsSettingInDB(id=setting_id, **setting.dict())
@@ -814,344 +979,20 @@ async def update_analytics_setting(setting_id: int, setting: AnalyticsSetting, u
 async def delete_analytics_setting(setting_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("DELETE FROM analytics_settings WHERE id = ", (setting_id,))
+        cursor.execute("DELETE FROM analytics_settings WHERE id = %s", (setting_id,))
         return {"message": "Deleted"}
 
-
-# ==============================
-# Управление категориями расходов
-# ==============================
-@app.get("/categories/expense/all")
-async def get_all_expense_categories(user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        # SQLite не поддерживает NULLS FIRST, эквивалентная сортировка ниже
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            SELECT id, name, parent_id, is_active
-            FROM expense_categories
-            ORDER BY (parent_id IS NOT NULL), parent_id, name
-            """
-        )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
-
-
-@app.post("/categories/expense")
-async def create_expense_category(
-    name: str = Body(...),
-    parent_id: Optional[int] = Body(None),
-    user_id: int = Depends(get_current_user_id),
-):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (, ?, 1)",
-            (name, parent_id),
-        )
-        new_id = cursor.lastrowid
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
-            (new_id,),
-        )
-        row = cursor.fetchone()
-        return row_to_dict(row)
-
-
-@app.put("/categories/expense/{category_id}")
-async def update_expense_category(
-    category_id: int,
-    name: str = Body(...),
-    parent_id: Optional[int] = Body(None),
-    user_id: int = Depends(get_current_user_id),
-):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE expense_categories SET name = , parent_id = ? WHERE id = ?",
-            (name, parent_id, category_id),
-        )
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
-            (category_id,),
-        )
-        row = cursor.fetchone()
-        return row_to_dict(row)
-
-
-@app.delete("/categories/expense/{category_id}")
-async def archive_expense_category(category_id: int, user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE expense_categories SET is_active = 0 WHERE id = ",
-            (category_id,),
-        )
-        return {"success": True}
-
-
-# ==============================
-# СИНХРОНИЗИРОВАННОЕ управление наименованиями
-# (обновляет ОБЕ таблицы: expense_categories И income_categories)
-# ==============================
-
-@app.get("/categories/unified/all")
-async def get_all_unified_categories(user_id: int = Depends(get_current_user_id)):
-    """
-    Получить ОБЪЕДИНЁННЫЙ список наименований (без дублей)
-    Берём из expense_categories, т.к. там больше данных
-    """
-    with db_session() as conn:
-        # УБРАНА фильтрация по user_id
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            SELECT id, name, parent_id, is_active
-            FROM expense_categories
-            WHERE is_active = 1
-            ORDER BY (parent_id IS NOT NULL), parent_id, name
-            """
-        )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
-
-
-@app.post("/categories/unified")
-async def create_unified_category(
-    name: str = Body(...),
-    parent_id: Optional[int] = Body(None),
-    user_id: int = Depends(get_current_user_id),
-):
-    """
-    Создать наименование в ОБЕИХ таблицах одновременно
-    """
-    with db_session() as conn:
-        # 1. Создать в expense_categories
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "INSERT INTO expense_categories (name, parent_id, is_active) VALUES (, , 1)",
-            (name, parent_id),
-        )
-        expense_id = cursor.lastrowid
-        
-        # 2. Создать в income_categories (БЕЗ parent_id, если его нет в таблице)
-        try:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute(
-                "INSERT INTO income_categories (name, is_active) VALUES (, 1)",
-                (name,),
-            )
-        except Exception as e:
-            print(f"Не удалось создать в income_categories: {e}")
-        
-        # 3. Вернуть созданную категорию из expense_categories
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
-            (expense_id,),
-        )
-        row = cursor.fetchone()
-        
-        return row_to_dict(row)
-
-
-@app.put("/categories/unified/{category_id}")
-async def update_unified_category(
-    category_id: int,
-    name: str = Body(...),
-    parent_id: Optional[int] = Body(None),
-    user_id: int = Depends(get_current_user_id),
-):
-    """
-    Обновить наименование в ОБЕИХ таблицах одновременно
-    Обновляем по ID в expense_categories и по ИМЕНИ в income_categories
-    """
-    with db_session() as conn:
-        # 1. Получить старое имя из expense_categories
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT name FROM expense_categories WHERE id = ",
-            (category_id,),
-        )
-        old_row = cursor.fetchone()
-        
-        if not old_row:
-            raise HTTPException(status_code=404, detail="Category not found")
-        
-        old_name = old_row['name']
-        
-        # 2. Обновить в expense_categories по ID
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE expense_categories SET name = , parent_id = ? WHERE id = ?",
-            (name, parent_id, category_id),
-        )
-        
-        # 3. Обновить в income_categories по СТАРОМУ ИМЕНИ
-        try:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute(
-                "UPDATE income_categories SET name =  WHERE name = ?",
-                (name, old_name),
-            )
-        except Exception as e:
-            print(f"Не удалось обновить в income_categories: {e}")
-        
-        # 4. Вернуть обновлённую категорию
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT id, name, parent_id, is_active FROM expense_categories WHERE id = ",
-            (category_id,),
-        )
-        row = cursor.fetchone()
-        
-        return row_to_dict(row)
-
-
-@app.delete("/categories/unified/{category_id}")
-async def archive_unified_category(
-    category_id: int,
-    user_id: int = Depends(get_current_user_id)
-):
-    """
-    Архивировать наименование в ОБЕИХ таблицах одновременно
-    """
-    with db_session() as conn:
-        # 1. Получить имя категории
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT name FROM expense_categories WHERE id = ",
-            (category_id,),
-        )
-        row = cursor.fetchone()
-        
-        if not row:
-            raise HTTPException(status_code=404, detail="Category not found")
-        
-        category_name = row['name']
-        
-        # 2. Архивировать в expense_categories по ID
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE expense_categories SET is_active = 0 WHERE id = ",
-            (category_id,),
-        )
-        
-        # 3. Архивировать в income_categories по ИМЕНИ
-        try:
-            cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cursor.execute(
-                "UPDATE income_categories SET is_active = 0 WHERE name = ",
-                (category_name,),
-            )
-        except Exception as e:
-            print(f"Не удалось архивировать в income_categories: {e}")
-        
-        return {"success": True, "message": f"Archived '{category_name}' in both tables"}
-
-
-# ==================
-# Управление счетами
-# ==================
-@app.get("/accounts/all")
-async def get_all_accounts(user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        # УБРАНА фильтрация по user_id
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            SELECT id, name, type, is_active 
-            FROM accounts
-            WHERE is_active = 1 
-            ORDER BY name
-            """
-        )
-        rows = cursor.fetchall()
-        return [row_to_dict(row) for row in rows]
-
-
-@app.post("/accounts")
-async def create_account(
-    name: str = Body(...),
-    type: str = Body(...),
-    user_id: int = Depends(get_current_user_id),
-):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "INSERT INTO accounts (name, type, is_active) VALUES (, , 1)",
-            (name, type),
-        )
-        new_id = cursor.lastrowid
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT id, name, type, is_active FROM accounts WHERE id = ",
-            (new_id,),
-        )
-        row = cursor.fetchone()
-        return row_to_dict(row)
-
-
-@app.put("/accounts/{account_id}")
-async def update_account(
-    account_id: int,
-    name: str = Body(...),
-    type: str = Body(...),
-    user_id: int = Depends(get_current_user_id),
-):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE accounts SET name = , type = ? WHERE id = ?",
-            (name, type, account_id),
-        )
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT id, name, type, is_active FROM accounts WHERE id = ",
-            (account_id,),
-        )
-        row = cursor.fetchone()
-        return row_to_dict(row)
-
-
-@app.delete("/accounts/{account_id}")
-async def archive_account(account_id: int, user_id: int = Depends(get_current_user_id)):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE accounts SET is_active = 0 WHERE id = ",
-            (account_id,),
-        )
-        return {"success": True}
-
-
-# ==============================
-# Управление блоками аналитики
-# ==============================
-class AnalyticBlock(BaseModel):
-    code: str
-    name: str
-    icon: str = '📊'
-    color: str = 'blue'
-    threshold_good: float = 25.0
-    threshold_warning: float = 35.0
-    sort_order: int = 0
-
-class AnalyticBlockInDB(AnalyticBlock):
-    id: int
-    is_active: int
 
 @app.get("/analytics/blocks", response_model=List[AnalyticBlockInDB])
 async def get_analytic_blocks(user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
-            "SELECT * FROM analytic_blocks WHERE is_active = 1 ORDER BY sort_order, name"
+            "SELECT * FROM analytic_blocks WHERE is_active = TRUE ORDER BY sort_order, name"
         )
         rows = cursor.fetchall()
         return [row_to_dict(row) for row in rows]
+
 
 @app.post("/analytics/blocks", response_model=AnalyticBlockInDB)
 async def create_analytic_block(block: AnalyticBlock, user_id: int = Depends(get_current_user_id)):
@@ -1161,18 +1002,16 @@ async def create_analytic_block(block: AnalyticBlock, user_id: int = Depends(get
             """
             INSERT INTO analytic_blocks 
              (code, name, icon, color, threshold_good, threshold_warning, sort_order, is_active) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+             VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)
             """,
             (block.code, block.name, block.icon, block.color, 
              block.threshold_good, block.threshold_warning, block.sort_order),
         )
         new_id = cursor.lastrowid
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT * FROM analytic_blocks WHERE id = ", (new_id,)
-        )
+        cursor.execute("SELECT * FROM analytic_blocks WHERE id = %s", (new_id,))
         row = cursor.fetchone()
         return row_to_dict(row)
+
 
 @app.put("/analytics/blocks/{block_id}", response_model=AnalyticBlockInDB)
 async def update_analytic_block(
@@ -1184,72 +1023,61 @@ async def update_analytic_block(
         cursor.execute(
             """
             UPDATE analytic_blocks 
-             SET code = , name = ?, icon = ?, color = ?, 
-                 threshold_good = ?, threshold_warning = ?, sort_order = ?
-            WHERE id = ?
+             SET code = %s, name = %s, icon = %s, color = %s, 
+                 threshold_good = %s, threshold_warning = %s, sort_order = %s
+            WHERE id = %s
             """,
             (block.code, block.name, block.icon, block.color, 
              block.threshold_good, block.threshold_warning, block.sort_order, block_id),
         )
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "SELECT * FROM analytic_blocks WHERE id = ", (block_id,)
-        )
+        cursor.execute("SELECT * FROM analytic_blocks WHERE id = %s", (block_id,))
         row = cursor.fetchone()
         return row_to_dict(row)
+
 
 @app.delete("/analytics/blocks/{block_id}")
 async def delete_analytic_block(block_id: int, user_id: int = Depends(get_current_user_id)):
     with db_session() as conn:
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            "UPDATE analytic_blocks SET is_active = 0 WHERE id = ", (block_id,)
-        )
+        cursor.execute("UPDATE analytic_blocks SET is_active = FALSE WHERE id = %s", (block_id,))
         return {"success": True}
+
 
 @app.get("/analytics/accounts/{account_id}/balance")
 async def get_account_balance(account_id: int, user_id: int = Depends(get_current_user_id)):
-    """
-    Получить текущий баланс счёта в реальном времени
-    """
     with db_session() as conn:
-        # Получить сумму всех приходов на счёт
         income_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         income_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type = 'income' AND account_id = 
+            WHERE type = 'income' AND account_id = %s
         """, (account_id,))
         total_income = income_cursor.fetchone()[0]
         
-        # Получить сумму всех расходов со счёта
         expense_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         expense_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type = 'expense' AND account_id = 
+            WHERE type = 'expense' AND account_id = %s
         """, (account_id,))
         total_expense = expense_cursor.fetchone()[0]
         
-        # Получить входящие переводы (to_account_id)
         transfer_in_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         transfer_in_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type IN ('transfer', 'incasation') AND to_account_id = 
+            WHERE type IN ('transfer', 'incasation') AND to_account_id = %s
         """, (account_id,))
         transfer_in = transfer_in_cursor.fetchone()[0]
         
-        # Получить исходящие переводы (from_account_id)
         transfer_out_cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         transfer_out_cursor.execute("""
             SELECT COALESCE(SUM(amount), 0) as total
             FROM timeline
-            WHERE type IN ('transfer', 'incasation') AND from_account_id = 
+            WHERE type IN ('transfer', 'incasation') AND from_account_id = %s
         """, (account_id,))
         transfer_out = transfer_out_cursor.fetchone()[0]
         
-        # Баланс = приходы + входящие переводы - расходы - исходящие переводы
         balance = total_income + transfer_in - total_expense - transfer_out
         
         return {
@@ -1269,31 +1097,26 @@ async def get_account_movements(
     days: int = None,
     user_id: int = Depends(get_current_user_id)
 ):
-    """
-    Получить движения по счёту за период
-    """
     with db_session() as conn:
-        # Формируем WHERE clause в зависимости от параметров
         if start_date and end_date:
-            date_filter = "AND date >= ? AND date <= ?"
+            date_filter = "AND date >= %s AND date <= %s"
             date_params = (start_date, end_date)
         elif days:
-            date_filter = "AND date >= date('now', ?)"
-            date_params = (f'-{days} days',)
+            date_filter = "AND date >= (CURRENT_DATE - INTERVAL '%s days')"
+            date_params = (days,)
         else:
             date_filter = ""
             date_params = ()
         
-        # Получить все операции связанные со счётом
         query = f"""
             SELECT 
                 id, date, type, amount, description, category_id,
                 from_account_id, to_account_id, commission_amount
             FROM timeline
             WHERE (
-                (type = 'income' AND account_id = ?)
-                OR (type = 'expense' AND account_id = ?)
-                OR (type IN ('transfer', 'incasation') AND (from_account_id = ? OR to_account_id = ?))
+                (type = 'income' AND account_id = %s)
+                OR (type = 'expense' AND account_id = %s)
+                OR (type IN ('transfer', 'incasation') AND (from_account_id = %s OR to_account_id = %s))
             )
             {date_filter}
             ORDER BY date DESC, id DESC
@@ -1306,8 +1129,6 @@ async def get_account_movements(
         operations = []
         for row in cursor.fetchall():
             op = row_to_dict(row)
-            
-            # Определить влияние на баланс
             if op['type'] == 'income':
                 op['balance_change'] = op['amount']
                 op['direction'] = 'in'
@@ -1321,10 +1142,8 @@ async def get_account_movements(
                 else:
                     op['balance_change'] = -(op['amount'] + (op['commission_amount'] or 0))
                     op['direction'] = 'out'
-            
             operations.append(op)
         
-        # Статистика за период
         total_in = sum(op['balance_change'] for op in operations if op['balance_change'] > 0)
         total_out = abs(sum(op['balance_change'] for op in operations if op['balance_change'] < 0))
         
@@ -1344,42 +1163,35 @@ async def get_account_chart(
     days: int = None,
     user_id: int = Depends(get_current_user_id)
 ):
-    """
-    Получить данные для графика динамики баланса счёта
-    """
     with db_session() as conn:
-        # Формируем WHERE clause
         if start_date and end_date:
-            date_filter = "AND date >= ? AND date <= ?"
+            date_filter = "AND date >= %s AND date <= %s"
             date_params = (start_date, end_date)
         elif days:
-            date_filter = "AND date >= date('now', ?)"
-            date_params = (f'-{days} days',)
+            date_filter = "AND date >= (CURRENT_DATE - INTERVAL '%s days')"
+            date_params = (days,)
         else:
             date_filter = ""
             date_params = ()
         
-        # Получить операции
         query = f"""
             SELECT date, type, amount, from_account_id, to_account_id, commission_amount
             FROM timeline
             WHERE (
-                (type = 'income' AND account_id = ?)
-                OR (type = 'expense' AND account_id = ?)
-                OR (type IN ('transfer', 'incasation') AND (from_account_id = ? OR to_account_id = ?))
+                (type = 'income' AND account_id = %s)
+                OR (type = 'expense' AND account_id = %s)
+                OR (type IN ('transfer', 'incasation') AND (from_account_id = %s OR to_account_id = %s))
             )
             {date_filter}
             ORDER BY date ASC, id ASC
         """
-        
         params = (account_id, account_id, account_id, account_id) + date_params
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(query, params)
         
-        # Группировка по дням
         daily_data = {}
         for row in cursor.fetchall():
-            date = row['date']
+            date = str(row['date'])
             if date not in daily_data:
                 daily_data[date] = {'income': 0, 'expense': 0}
             
@@ -1393,41 +1205,37 @@ async def get_account_chart(
                 else:
                     daily_data[date]['expense'] += row['amount'] + (row['commission_amount'] or 0)
         
-        # Формируем массив с накопительным балансом
         result = []
         cumulative_balance = 0
-        
         for date in sorted(daily_data.keys()):
             day_income = daily_data[date]['income']
             day_expense = daily_data[date]['expense']
             cumulative_balance += (day_income - day_expense)
-            
             result.append({
                 'date': date,
                 'income': day_income,
                 'expense': day_expense,
                 'balance': cumulative_balance
             })
-        
         return result
 
 
-# --- Health endpoints (useful for Railway healthchecks) ---
+# ============================================
+# STARTUP / HEALTH / CASHIER
+# ============================================
+
 @app.get("/")
 def root():
     return {"status": "ok", "message": "Finance API v1.0"}
-
 
 @app.get("/health")
 def health():
     return {"status": "healthy"}
 
-
 @app.on_event("startup")
 async def startup_event():
     """Инициализация базы данных при запуске"""
     import os
-    
     try:
         print("=" * 60)
         print("🚀 STARTING AIR WAFFLE FINANCE")
@@ -1477,9 +1285,6 @@ async def startup_event():
         raise
 
 
-
-# ========== КАССИРСКИЕ ОТЧЁТЫ ==========
-
 @app.get("/cashier/locations")
 async def get_locations():
     """Получить список точек продаж"""
@@ -1489,7 +1294,7 @@ async def get_locations():
             """
             SELECT id, name, address, is_active 
             FROM locations 
-            WHERE is_active = 1
+            WHERE is_active = TRUE
             ORDER BY name
             """
         )
@@ -1504,9 +1309,9 @@ async def get_payment_methods():
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
-            SELECT id, name, method_type, commission_percent, is_active 
+            SELECT id, name, commission_percent, is_active 
             FROM payment_methods 
-            WHERE is_active = 1
+            WHERE is_active = TRUE
             ORDER BY name
             """
         )
@@ -1523,12 +1328,11 @@ async def create_cashier_report(
     ГЛАВНЫЙ ENDPOINT: Получить отчёт от кассирского приложения
     """
     with db_session() as conn:
-        # Проверяем существование отчёта
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
             SELECT id FROM cashier_reports 
-            WHERE report_date =  AND location_id = ?
+            WHERE report_date = %s AND location_id = %s
             """,
             (report_data['report_date'], report_data['location_id'])
         )
@@ -1540,14 +1344,12 @@ async def create_cashier_report(
                 detail=f"Отчёт за {report_data['report_date']} для этой точки уже существует"
             )
 
-        # Создаём отчёт
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute(
             """
             INSERT INTO cashier_reports (
                 report_date, location_id, user_id, total_sales,
-                cash_actual, status, closed_at
-            ) VALUES (, ?, ?, ?, ?, 'closed', CURRENT_TIMESTAMP)
+                closing_balance, status, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, 'draft', CURRENT_TIMESTAMP)
             """,
             (
                 report_data['report_date'],
@@ -1559,162 +1361,41 @@ async def create_cashier_report(
         )
         report_id = cursor.lastrowid
 
-        # Добавляем платежи
         for payment in report_data.get('payments', []):
             if payment['amount'] > 0:
-                # Получаем процент комиссии
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cursor.execute(
-                    "SELECT commission_percent FROM payment_methods WHERE id = ",
+                    "SELECT commission_percent FROM payment_methods WHERE id = %s",
                     (payment['payment_method_id'],)
                 )
                 method = cursor.fetchone()
-
                 commission_percent = method['commission_percent'] if method else 0
-                commission_amount = payment['amount'] * commission_percent / 100
-                net_amount = payment['amount'] - commission_amount
-
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                
                 cursor.execute(
                     """
                     INSERT INTO cashier_report_payments (
-                        report_id, payment_method_id, amount, 
-                        commission_amount, net_amount
-                    ) VALUES (, ?, ?, ?, ?)
+                        report_id, payment_method_id, amount
+                    ) VALUES (%s, %s, %s)
                     """,
-                    (report_id, payment['payment_method_id'], 
-                      payment['amount'], commission_amount, net_amount)
+                    (report_id, payment['payment_method_id'], payment['amount'])
                 )
 
-                # Создаём income операцию в timeline (если метод не "наличные")
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                cursor.execute(
-                    "SELECT name, method_type FROM payment_methods WHERE id = ",
-                    (payment['payment_method_id'],)
-                )
-                method_info = cursor.fetchone()
-
-                if method_info and method_info['method_type'] != 'cash':
-                    # Находим категорию "Выручка" или создаём
-                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    cursor.execute(
-                        "SELECT id FROM income_categories WHERE name = 'Выручка' LIMIT 1"
-                    )
-                    income_cat = cursor.fetchone()
-
-                    if not income_cat:
-                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                        cur.execute(
-                            "INSERT INTO income_categories (name, is_active) VALUES ('Выручка', 1)"
-                        )
-                        income_cat_id = cur.lastrowid
-                    else:
-                        income_cat_id = income_cat['id']
-
-                    # Находим счёт или создаём по типу метода
-                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    cursor.execute(
-                        "SELECT id FROM accounts WHERE name LIKE  LIMIT 1",
-                        (f"%{method_info['name']}%",)
-                    )
-                    account = cursor.fetchone()
-
-                    if not account:
-                        # Создаём базовый банковский счёт
-                        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                        cur.execute(
-                            "INSERT INTO accounts (name, type, account_type, is_active) VALUES (, 'bank', 'bank', 1)",
-                            (method_info['name'],)
-                        )
-                        account_id = cur.lastrowid
-                    else:
-                        account_id = account['id']
-
-                    # Создаём income операцию
-                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    cursor.execute("""
-                        INSERT INTO timeline (
-                            date, type, category_id, account_id,
-                            amount, description, user_id
-                        ) VALUES (, 'income', ?, ?, ?, ?, ?)
-                    """, (
-                        report_data['report_date'],
-                        income_cat_id,
-                        account_id,
-                        net_amount,
-                        f"Выручка ({method_info['name']}) - Отчёт кассира",
-                        current_user_id
-                    ))
-
-        # Добавляем расходы
         for expense in report_data.get('expenses', []):
             if expense['amount'] > 0:
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cursor.execute("""
                     INSERT INTO cashier_report_expenses (
-                        report_id, category_id, amount, description
-                    ) VALUES (, ?, ?, ?)
+                        report_id, category_id, amount, notes
+                    ) VALUES (%s, %s, %s, %s)
                 """, (report_id, expense.get('category_id'), 
                       expense['amount'], expense.get('description', '')))
 
-                # Создаём expense операцию в timeline
-                if expense.get('category_id'):
-                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    cursor.execute(
-                        "SELECT id FROM accounts WHERE type = 'cash' LIMIT 1"
-                    )
-                    cash_account = cursor.fetchone()
-
-                    if cash_account:
-                        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                        cursor.execute("""
-                            INSERT INTO timeline (
-                                date, type, category_id, account_id,
-                                amount, description, user_id
-                            ) VALUES (, 'expense', ?, ?, ?, ?, ?)
-                        """, (
-                            report_data['report_date'],
-                            expense['category_id'],
-                            cash_account['id'],
-                            expense['amount'],
-                            expense.get('description', 'Расход из отчёта кассира'),
-                            current_user_id
-                        ))
-
-        # Добавляем прочие приходы
         for income in report_data.get('incomes', []):
             if income['amount'] > 0:
-                cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cursor.execute("""
                     INSERT INTO cashier_report_income (
-                        report_id, category_id, amount, description
-                    ) VALUES (, ?, ?, ?)
+                        report_id, category_id, amount, notes
+                    ) VALUES (%s, %s, %s, %s)
                 """, (report_id, income.get('category_id'), 
                       income['amount'], income.get('description', '')))
-
-                # Создаём income операцию в timeline
-                if income.get('category_id'):
-                    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                    cursor.execute(
-                        "SELECT id FROM accounts WHERE type = 'cash' LIMIT 1"
-                    )
-                    cash_account = cursor.fetchone()
-
-                    if cash_account:
-                        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-                        cursor.execute("""
-                            INSERT INTO timeline (
-                                date, type, category_id, account_id,
-                                amount, description, user_id
-                            ) VALUES (, 'income', ?, ?, ?, ?, ?)
-                        """, (
-                            report_data['report_date'],
-                            income['category_id'],
-                            cash_account['id'],
-                            income['amount'],
-                            income.get('description', 'Приход из отчёта кассира'),
-                            current_user_id
-                        ))
 
         return {
             "success": True,
@@ -1745,13 +1426,13 @@ async def get_cashier_reports(
         """
         params = []
         if start_date:
-            query += " AND cr.report_date >= ?"
+            query += " AND cr.report_date >= %s"
             params.append(start_date)
         if end_date:
-            query += " AND cr.report_date <= ?"
+            query += " AND cr.report_date <= %s"
             params.append(end_date)
         if location_id:
-            query += " AND cr.location_id = ?"
+            query += " AND cr.location_id = %s"
             params.append(location_id)
         query += " ORDER BY cr.report_date DESC, cr.created_at DESC"
 
@@ -1778,7 +1459,7 @@ async def get_cashier_report_details(
             FROM cashier_reports cr
             LEFT JOIN locations l ON cr.location_id = l.id
             LEFT JOIN users u ON cr.user_id = u.id
-            WHERE cr.id = 
+            WHERE cr.id = %s
         """, (report_id,))
         report = cursor.fetchone()
 
@@ -1787,39 +1468,35 @@ async def get_cashier_report_details(
 
         result = row_to_dict(report)
 
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT 
                 crp.*,
-                pm.name as payment_method_name,
-                pm.method_type
+                pm.name as payment_method_name
             FROM cashier_report_payments crp
             LEFT JOIN payment_methods pm ON crp.payment_method_id = pm.id
-            WHERE crp.report_id = 
+            WHERE crp.report_id = %s
         """, (report_id,))
         payments = cursor.fetchall()
         result['payments'] = [row_to_dict(p) for p in payments]
 
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT 
                 cre.*,
                 ec.name as category_name
             FROM cashier_report_expenses cre
             LEFT JOIN expense_categories ec ON cre.category_id = ec.id
-            WHERE cre.report_id = 
+            WHERE cre.report_id = %s
         """, (report_id,))
         expenses = cursor.fetchall()
         result['expenses'] = [row_to_dict(e) for e in expenses]
 
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cursor.execute("""
             SELECT 
                 cri.*,
                 ic.name as category_name
             FROM cashier_report_income cri
             LEFT JOIN income_categories ic ON cri.category_id = ic.id
-            WHERE cri.report_id = 
+            WHERE cri.report_id = %s
         """, (report_id,))
         incomes = cursor.fetchall()
         result['incomes'] = [row_to_dict(i) for i in incomes]
