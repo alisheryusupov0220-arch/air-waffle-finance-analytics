@@ -15,6 +15,15 @@ from pydantic import BaseModel, Field
 # НЕ ИМПОРТИРУЕМ sqlite3! (PostgreSQL-only)
 
 from auth import get_current_user_id
+# Database helpers
+from database import (
+    execute_query,
+    execute_insert,
+    execute_update,
+    execute_delete,
+    get_one,
+    get_all,
+)
 
 # --- Импорты из analytics.py ---
 from analytics import dashboard, pivot_table, get_trend_data, get_cell_details
