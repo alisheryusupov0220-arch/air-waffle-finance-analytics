@@ -1442,9 +1442,26 @@ async def startup_event():
         print(f"✅ DATABASE_URL found: {database_url[:60]}...")
         print("📊 Initializing PostgreSQL database...")
         
-        # Инициализация PostgreSQL таблиц
-        from init_db_postgres import init_database
-        init_database()
+        # Инициализация БД только при отсутствии базовых таблиц
+        try:
+            conn = get_db_connection()
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COUNT(*) 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = 'users'
+            """)
+            table_exists = cur.fetchone()[0] > 0
+            cur.close()
+            conn.close()
+            if not table_exists:
+                print("📊 Initializing database (first run)...")
+                from init_db_postgres import init_database
+                init_database()
+            else:
+                print("✅ Database already initialized")
+        except Exception as e:
+            print(f"⚠️  Database check failed: {e}")
         
         print("=" * 60)
         print("✅ APPLICATION STARTED SUCCESSFULLY")

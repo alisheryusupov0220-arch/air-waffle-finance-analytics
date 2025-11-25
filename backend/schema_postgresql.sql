@@ -248,15 +248,19 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
+DROP TRIGGER IF EXISTS update_users_updated_at ON users;
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_accounts_updated_at ON accounts;
 CREATE TRIGGER update_accounts_updated_at BEFORE UPDATE ON accounts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_timeline_updated_at ON timeline;
 CREATE TRIGGER update_timeline_updated_at BEFORE UPDATE ON timeline
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS update_cashier_reports_updated_at ON cashier_reports;
 CREATE TRIGGER update_cashier_reports_updated_at BEFORE UPDATE ON cashier_reports
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
