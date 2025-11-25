@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta
 
-# Твой импорт db_session, как и был
-from database import db_session
+# Database access helpers for PostgreSQL
+from database import execute_query
+import psycopg2.extras
 
 
 # 1. Функция переименована в 'dashboard'
@@ -17,70 +18,66 @@ def dashboard(days: int = 30, start_date: str = None, end_date: str = None):
         end_dt = datetime.now().date()
         start_dt = end_dt - timedelta(days=days)
 
-    with db_session() as conn:
-        revenue = (
-            conn.execute(
-                "SELECT SUM(amount) FROM timeline WHERE type='income' AND date >= ? AND date <= ?",
-                (start_dt, end_dt),
-            ).fetchone()[0]
-            or 0
+    revenue_row = execute_query(
+        "SELECT SUM(amount) AS total FROM timeline WHERE type='income' AND date >= %s AND date <= %s",
+        params=(start_dt, end_dt),
+        fetch_one=True,
+    )
+    revenue = (revenue_row["total"] if revenue_row else 0) or 0
+
+    expense_row = execute_query(
+        "SELECT SUM(amount) AS total FROM timeline WHERE type='expense' AND date >= %s AND date <= %s",
+        params=(start_dt, end_dt),
+        fetch_one=True,
+    )
+    total_expenses = (expense_row["total"] if expense_row else 0) or 0
+
+    # Получаем все активные блоки
+    blocks = execute_query(
+        "SELECT code FROM analytic_blocks WHERE is_active = 1",
+        fetch_all=True,
+    ) or []
+
+    result_data = {
+        "revenue": revenue,
+        "total_expenses": total_expenses,
+        "profit": revenue - total_expenses,
+        "profitability": round((revenue - total_expenses) / revenue * 100, 1) if revenue > 0 else 0,
+    }
+
+    # Динамически считаем данные для каждого блока
+    prime_cost = 0
+    for block_row in blocks:
+        block_code = block_row["code"]
+        block_row_sum = execute_query(
+            """
+            SELECT SUM(t.amount) AS total
+            FROM timeline t
+            JOIN analytics_settings s ON t.category_id = s.category_id
+            WHERE t.type='expense' AND s.analytic_type = %s AND t.date >= %s AND t.date <= %s
+            """,
+            params=(block_code, start_dt, end_dt),
+            fetch_one=True,
+        )
+        block_amount = (block_row_sum["total"] if block_row_sum else 0) or 0
+        block_percentage = (block_amount / revenue * 100) if revenue > 0 else 0
+
+        result_data[block_code] = block_amount
+        result_data[f"{block_code}_percentage"] = round(block_percentage, 1)
+
+        # Для prime_cost суммируем food_cost и labor_cost
+        if block_code in ["food_cost", "labor_cost"]:
+            prime_cost += block_amount
+
+    # Добавляем prime_cost только если есть оба компонента
+    if "food_cost" in result_data and "labor_cost" in result_data:
+        result_data["prime_cost"] = prime_cost
+        result_data["prime_cost_percentage"] = round(
+            (prime_cost / revenue * 100) if revenue > 0 else 0, 1
         )
 
-        total_expenses = (
-            conn.execute(
-                "SELECT SUM(amount) FROM timeline WHERE type='expense' AND date >= ? AND date <= ?",
-                (start_dt, end_dt),
-            ).fetchone()[0]
-            or 0
-        )
-
-        # Получаем все активные блоки
-        blocks = conn.execute(
-            "SELECT code FROM analytic_blocks WHERE is_active = 1"
-        ).fetchall()
-
-        result_data = {
-            "revenue": revenue,
-            "total_expenses": total_expenses,
-            "profit": revenue - total_expenses,
-            "profitability": round((revenue - total_expenses) / revenue * 100, 1) if revenue > 0 else 0,
-        }
-
-        # Динамически считаем данные для каждого блока
-        prime_cost = 0
-        for block_row in blocks:
-            block_code = block_row[0]
-            
-            block_amount = (
-                conn.execute(
-                    """
-                    SELECT SUM(t.amount) FROM timeline t
-                    JOIN analytics_settings s ON t.category_id = s.category_id
-                    WHERE t.type='expense' AND s.analytic_type = ? AND t.date >= ? AND t.date <= ?
-                    """,
-                    (block_code, start_dt, end_dt),
-                ).fetchone()[0]
-                or 0
-            )
-            
-            block_percentage = (block_amount / revenue * 100) if revenue > 0 else 0
-            
-            result_data[block_code] = block_amount
-            result_data[f"{block_code}_percentage"] = round(block_percentage, 1)
-            
-            # Для prime_cost суммируем food_cost и labor_cost
-            if block_code in ['food_cost', 'labor_cost']:
-                prime_cost += block_amount
-
-        # Добавляем prime_cost только если есть оба компонента
-        if 'food_cost' in result_data and 'labor_cost' in result_data:
-            result_data['prime_cost'] = prime_cost
-            result_data['prime_cost_percentage'] = round(
-                (prime_cost / revenue * 100) if revenue > 0 else 0, 1
-            )
-
-        print("Dashboard data:", result_data)
-        return result_data
+    print("Dashboard data:", result_data)
+    return result_data
 
 
 # 1. Функция переименована в 'pivot_table'
@@ -97,76 +94,74 @@ def pivot_table(days: int = 30, start_date: str = None, end_date: str = None, gr
         end_dt = datetime.now().date()
         start_dt = end_dt - timedelta(days=days)
 
-    # Определяем формат группировки
+    # Определяем формат группировки для PostgreSQL
     if group_by == 'day':
-        date_format = '%Y-%m-%d'  # 2025-01-15
+        to_char_format = 'YYYY-MM-DD'
     else:
-        date_format = '%Y-%m'     # 2025-01
+        to_char_format = 'YYYY-MM'
 
-    with db_session() as conn:
-        cursor = conn.execute(
-            f"""
-            SELECT 
-                strftime('{date_format}', t.date) as period,
-                s.analytic_type,
-                ec.name as category_name,
-                SUM(t.amount) as total
-            FROM timeline t
-            JOIN expense_categories ec ON t.category_id = ec.id
-            LEFT JOIN analytics_settings s ON t.category_id = s.category_id
-            WHERE t.type = 'expense' AND t.date >= ? AND t.date <= ?
-            GROUP BY period, s.analytic_type, ec.name
-            ORDER BY period DESC, s.analytic_type, ec.name
-            """,
-            (start_dt, end_dt),
-        )
+    rows = execute_query(
+        f"""
+        SELECT 
+            to_char(t.date, '{to_char_format}') AS period,
+            s.analytic_type,
+            ec.name AS category_name,
+            SUM(t.amount) AS total
+        FROM timeline t
+        JOIN expense_categories ec ON t.category_id = ec.id
+        LEFT JOIN analytics_settings s ON t.category_id = s.category_id
+        WHERE t.type = 'expense' AND t.date >= %s AND t.date <= %s
+        GROUP BY period, s.analytic_type, ec.name
+        ORDER BY period DESC, s.analytic_type, ec.name
+        """,
+        params=(start_dt, end_dt),
+        fetch_all=True,
+    ) or []
 
-        rows = cursor.fetchall()
+    pivot_data = {}
+    for row in rows:
+        period = row["period"]
+        analytic_type = row["analytic_type"] or "other"
+        category = row["category_name"]
+        total = row["total"]
 
-        pivot_data = {}
-        for row in rows:
-            period = row[0]
-            analytic_type = row[1] or 'other'
-            category = row[2]
-            total = row[3]
-
-            if period not in pivot_data:
-                pivot_data[period] = {}
-            if analytic_type not in pivot_data[period]:
-                pivot_data[period][analytic_type] = {}
-            pivot_data[period][analytic_type][category] = total
-        
-        print(f"Pivot data ({group_by}):", pivot_data)
-        return pivot_data
+        if period not in pivot_data:
+            pivot_data[period] = {}
+        if analytic_type not in pivot_data[period]:
+            pivot_data[period][analytic_type] = {}
+        pivot_data[period][analytic_type][category] = total
+    
+    print(f"Pivot data ({group_by}):", pivot_data)
+    return pivot_data
 
 # Эта функция не упоминалась в инструкции, поэтому она остается без изменений.
 def get_trend_data(days: int = 30):
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=days)
 
-    with db_session() as conn:
-        cursor = conn.execute(
-            """
-            SELECT 
-                date,
-                SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as revenue,
-                SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expenses
-            FROM timeline
-            WHERE date BETWEEN ? AND ?
-            GROUP BY date
-            ORDER BY date
-            """,
-            (start_date, end_date),
-        )
+    rows = execute_query(
+        """
+        SELECT 
+            date,
+            SUM(CASE WHEN type='income' THEN amount ELSE 0 END) as revenue,
+            SUM(CASE WHEN type='expense' THEN amount ELSE 0 END) as expenses
+        FROM timeline
+        WHERE date BETWEEN %s AND %s
+        GROUP BY date
+        ORDER BY date
+        """,
+        params=(start_date, end_date),
+        fetch_all=True,
+    ) or []
 
-        return [
-            {
-                "date": row["date"],
-                "revenue": row["revenue"] or 0,
-                "expenses": row["expenses"] or 0,
-            }
-            for row in cursor.fetchall()
-        ]
+    return [
+        {
+            "date": row["date"],
+            "revenue": row["revenue"] or 0,
+            "expenses": row["expenses"] or 0,
+        }
+        for row in rows
+    ]
 
 def get_cell_details(period: str, category_name: str, group_by: str = 'month'):
     """
@@ -191,38 +186,36 @@ def get_cell_details(period: str, category_name: str, group_by: str = 'month'):
         start_dt = f"{year}-{month}-01"
         end_dt = f"{year}-{month}-{last_day:02d}"
     
-    with db_session() as conn:
-        cursor = conn.execute(
-            """
-            SELECT 
-                t.id,
-                t.date,
-                t.type,
-                t.amount,
-                t.description,
-                ec.name as category_name
-            FROM timeline t
-            JOIN expense_categories ec ON t.category_id = ec.id
-            WHERE ec.name = ? 
-                AND t.date >= ? 
-                AND t.date <= ?
-                AND t.type = 'expense'
-            ORDER BY t.date DESC, t.id DESC
-            """,
-            (category_name, start_dt, end_dt),
-        )
-        
-        rows = cursor.fetchall()
-        
-        operations = []
-        for row in rows:
-            operations.append({
-                "id": row[0],
-                "date": row[1],
-                "type": row[2],
-                "amount": row[3],
-                "description": row[4] or "Без описания",
-                "category_name": row[5]
-            })
-        
-        return operations        
+    rows = execute_query(
+        """
+        SELECT 
+            t.id,
+            t.date,
+            t.type,
+            t.amount,
+            t.description,
+            ec.name as category_name
+        FROM timeline t
+        JOIN expense_categories ec ON t.category_id = ec.id
+        WHERE ec.name = %s 
+            AND t.date >= %s 
+            AND t.date <= %s
+            AND t.type = 'expense'
+        ORDER BY t.date DESC, t.id DESC
+        """,
+        params=(category_name, start_dt, end_dt),
+        fetch_all=True,
+    ) or []
+    
+    operations = []
+    for row in rows:
+        operations.append({
+            "id": row["id"],
+            "date": row["date"],
+            "type": row["type"],
+            "amount": row["amount"],
+            "description": row["description"] or "Без описания",
+            "category_name": row["category_name"],
+        })
+    
+    return operations        
