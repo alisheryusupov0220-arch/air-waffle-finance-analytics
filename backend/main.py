@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, List
 from datetime import datetime, date
 from pydantic import BaseModel, Field
+from decimal import Decimal  # Добавлено для новых эндпоинтов
 
 # --- Импорты Helpers (из core_endpoints инструкции) ---
 from database import (
@@ -51,7 +52,6 @@ def get_db_connection():
 def db_session():
     """
     Context manager для работы с PostgreSQL базой данных.
-    Нужен для старых эндпоинтов (Timeline, Analytics), которые еще не переведены на helpers.
     """
     conn = get_db_connection()
     try:
@@ -66,10 +66,9 @@ def db_session():
 
 
 # ============================================
-# PYDANTIC MODELS (OLD + NEW merged)
+# CORE PYDANTIC MODELS
 # ============================================
 
-# --- New Models from core_endpoints.py ---
 class TelegramAuth(BaseModel):
     telegram_id: int
 
@@ -102,51 +101,6 @@ class ExpenseCategoryCreate(BaseModel):
 
 class IncomeCategoryCreate(BaseModel):
     name: str
-
-# --- Old Models (Still needed for Timeline/Operations) ---
-class TimelineItem(BaseModel):
-    id: int
-    date: str
-    type: str
-    category_id: Optional[int] = None
-    amount: float
-    account_id: Optional[int] = None
-    description: Optional[str] = None
-    source: Optional[str] = None
-    user_id: Optional[int] = None
-    from_account_id: Optional[int] = None
-    to_account_id: Optional[int] = None
-    commission_amount: Optional[float] = None
-    created_by_name: Optional[str] = None
-    created_by_username: Optional[str] = None 
-
-class OperationBase(BaseModel):
-    date: str = Field(default_factory=lambda: date.today().isoformat())
-    category_id: Optional[int] = None
-    account_id: int
-    amount: float = Field(gt=0)
-    description: Optional[str] = None
-
-class ExpenseCreate(OperationBase):
-    category_id: int
-
-class IncomeCreate(OperationBase):
-    category_id: int
-
-class IncasationCreate(BaseModel):
-    date: str = Field(default_factory=lambda: date.today().isoformat())
-    from_account_id: int
-    to_account_id: int
-    amount: float = Field(gt=0)
-    description: Optional[str] = None
-
-class TransferCreate(BaseModel):
-    date: str = Field(default_factory=lambda: date.today().isoformat())
-    from_account_id: int
-    to_account_id: int
-    amount: float = Field(gt=0)
-    commission_amount: float = Field(default=0, ge=0)
-    description: Optional[str] = None
 
 class AnalyticsSetting(BaseModel):
     category_id: int
@@ -196,7 +150,7 @@ def row_to_dict(row) -> dict:
 
 
 # ============================================
-# 1. AUTH ENDPOINTS (UPDATED)
+# 1. AUTH ENDPOINTS
 # ============================================
 
 @app.post("/auth/verify")
@@ -243,7 +197,7 @@ async def verify_telegram_user(auth_data: TelegramAuth):
 
 
 # ============================================
-# 2. USERS ENDPOINTS (UPDATED)
+# 2. USERS ENDPOINTS
 # ============================================
 
 @app.get("/users")
@@ -376,7 +330,7 @@ async def delete_user(
 
 
 # ============================================
-# 3. ACCOUNTS ENDPOINTS (UPDATED)
+# 3. ACCOUNTS ENDPOINTS
 # ============================================
 
 @app.get("/accounts")
@@ -473,7 +427,7 @@ async def delete_account(
 
 
 # ============================================
-# 4. EXPENSE CATEGORIES ENDPOINTS (UPDATED)
+# 4. EXPENSE CATEGORIES ENDPOINTS
 # ============================================
 
 @app.get("/categories/expense")
@@ -547,7 +501,7 @@ async def archive_expense_category(category_id: int, user_id: int = Depends(get_
 
 
 # ============================================
-# 5. INCOME CATEGORIES ENDPOINTS (UPDATED)
+# 5. INCOME CATEGORIES ENDPOINTS
 # ============================================
 
 @app.get("/categories/income")
@@ -582,7 +536,7 @@ async def create_income_category(
 
 
 # ============================================
-# UNIFIED CATEGORIES (NEW from core_endpoints context)
+# UNIFIED CATEGORIES
 # ============================================
 
 @app.get("/categories/unified/all")
@@ -701,195 +655,687 @@ async def archive_unified_category(
 
 
 # ============================================
-# LEGACY ENDPOINTS (TIMELINE, OPERATIONS, ETC)
+# PAYMENT METHODS & LOCATIONS ENDPOINTS
 # ============================================
 
-@app.get("/timeline", response_model=List[TimelineItem])
-async def get_timeline(
-    limit: int = Query(50, gt=0, le=200),
-    start_date: str = None,
-    end_date: str = None,
-    user_id: int = Depends(get_current_user_id),
-):
-    if start_date and end_date:
-        rows = execute_query(
-            """
-            SELECT 
-                t.*,
-                u.full_name as created_by_name,
-                u.username as created_by_username
-            FROM timeline t
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE t.date BETWEEN %s AND %s
-            ORDER BY t.date DESC, t.id DESC
-            LIMIT %s
-            """,
-            params=(start_date, end_date, limit),
-            fetch_all=True,
-        )
-    else:
-        rows = execute_query(
-            """
-            SELECT 
-                t.*,
-                u.full_name as created_by_name,
-                u.username as created_by_username
-            FROM timeline t
-            LEFT JOIN users u ON t.user_id = u.id
-            ORDER BY t.date DESC, t.id DESC
-            LIMIT %s
-            """,
-            params=(limit,),
-            fetch_all=True,
-        )
-    return rows if rows else []
+# --- PYDANTIC MODELS FOR PAYMENT/LOCATIONS ---
+
+class PaymentMethodCreate(BaseModel):
+    name: str
+    commission_percent: float = 0
+
+class PaymentMethodUpdate(BaseModel):
+    name: Optional[str] = None
+    commission_percent: Optional[float] = None
+    is_active: Optional[bool] = None
+
+class LocationCreate(BaseModel):
+    name: str
+    address: Optional[str] = None
+
+class LocationUpdate(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+    is_active: Optional[bool] = None
+
+# --- PAYMENT METHODS ENDPOINTS ---
+
+@app.get("/payment-methods")
+async def get_payment_methods(user_id: int = Depends(get_current_user_id)):
+    """Получить все методы оплаты"""
+    methods = get_all(
+        'payment_methods',
+        'is_active = %s',
+        (True,),
+        order_by='name'
+    )
+    return methods
 
 
-@app.post("/operations/expense", response_model=TimelineItem)
-async def create_expense(
-    payload: ExpenseCreate,
-    user_id: int = Depends(get_current_user_id),
-):
-    print("Попытка создать expense:", payload.dict())
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            INSERT INTO timeline (
-                date, type, category_id, amount, account_id, description, source, user_id
-            ) VALUES (%s, 'expense', %s, %s, %s, %s, 'miniapp', %s)
-            """,
-            (str(payload.date), payload.category_id, payload.amount, payload.account_id, payload.description, user_id),
-        )
-        timeline_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to create expense")
-        return row_to_dict(row)
-
-
-@app.post("/operations/income", response_model=TimelineItem)
-async def create_income(
-    payload: IncomeCreate,
-    user_id: int = Depends(get_current_user_id),
-):
-    print("Попытка создать income:", payload.dict())
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            INSERT INTO timeline (
-                date, type, category_id, amount, account_id, description, source, user_id
-            ) VALUES (%s, 'income', %s, %s, %s, %s, 'miniapp', %s)
-            """,
-            (str(payload.date), payload.category_id, payload.amount, payload.account_id, payload.description, user_id),
-        )
-        timeline_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to create income")
-        return row_to_dict(row)
-
-
-@app.post("/transfers/incasation", response_model=TimelineItem)
-async def create_incasation(
-    payload: IncasationCreate,
-    user_id: int = Depends(get_current_user_id),
-):
-    print("Попытка создать incasation:", payload.dict())
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            INSERT INTO timeline (
-                date, type, amount, description, source, user_id, from_account_id, to_account_id
-            ) VALUES (%s, 'incasation', %s, %s, 'miniapp', %s, %s, %s)
-            """,
-            (str(payload.date), payload.amount, payload.description, user_id, payload.from_account_id, payload.to_account_id),
-        )
-        timeline_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to create incasation record")
-        return row_to_dict(row)
-
-
-@app.post("/transfers/transfer", response_model=TimelineItem)
-async def create_transfer(
-    payload: TransferCreate,
-    user_id: int = Depends(get_current_user_id),
-):
-    print("Попытка создать transfer:", payload.dict())
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute(
-            """
-            INSERT INTO timeline (
-                date, type, amount, description, source, user_id, from_account_id, to_account_id, commission_amount
-            ) VALUES (%s, 'transfer', %s, %s, 'miniapp', %s, %s, %s, %s)
-            """,
-            (str(payload.date), payload.amount, payload.description, user_id, payload.from_account_id, payload.to_account_id, payload.commission_amount),
-        )
-        timeline_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM timeline WHERE id = %s", (timeline_id,))
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to create transfer record")
-        return row_to_dict(row)
-
-
-@app.put("/timeline/{timeline_id}", response_model=TimelineItem)
-async def update_timeline_item(
-    timeline_id: int,
-    payload: dict = Body(...),
-    user_id: int = Depends(get_current_user_id),
-):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("SELECT user_id FROM timeline WHERE id = %s", (timeline_id,))
-        check = cursor.fetchone()
-        
-        if not check:
-            raise HTTPException(status_code=404, detail="Operation not found")
-        if check['user_id'] != user_id:
-            raise HTTPException(status_code=403, detail="You can only edit your own operations")
-        
-        set_clause = ", ".join([f"{k} = %s" for k in payload.keys()])
-        values = list(payload.values()) + [timeline_id]
-        
-        cursor.execute(f"UPDATE timeline SET {set_clause} WHERE id = %s", values)
-        cursor.execute(
-            """
-            SELECT t.*, u.full_name as created_by_name, u.username as created_by_username
-            FROM timeline t LEFT JOIN users u ON t.user_id = u.id
-            WHERE t.id = %s
-            """,
-            (timeline_id,)
-        )
-        row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=500, detail="Failed to update operation")
-        return row_to_dict(row)
-
-
-@app.delete("/timeline/{timeline_id}")
-async def delete_timeline_item(
-    timeline_id: int,
+@app.post("/payment-methods")
+async def create_payment_method(
+    method_data: PaymentMethodCreate,
     user_id: int = Depends(get_current_user_id)
 ):
-    with db_session() as conn:
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        cursor.execute("SELECT user_id FROM timeline WHERE id = %s", (timeline_id,))
-        check = cursor.fetchone()
-        if not check:
-            raise HTTPException(status_code=404, detail="Operation not found")
-        if check['user_id'] != user_id:
-            raise HTTPException(status_code=403, detail="You can only delete your own operations")
-        cursor.execute("DELETE FROM timeline WHERE id = %s", (timeline_id,))
-        return {"success": True}
+    """
+    Создать метод оплаты
+    
+    Только owner и manager
+    """
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    new_method_id = execute_insert('payment_methods', {
+        'name': method_data.name,
+        'commission_percent': method_data.commission_percent,
+        'is_active': True
+    })
+    
+    new_method = get_one('payment_methods', 'id = %s', (new_method_id,))
+    return new_method
+
+
+@app.put("/payment-methods/{method_id}")
+async def update_payment_method(
+    method_id: int,
+    method_data: PaymentMethodUpdate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Обновить метод оплаты
+    
+    Только owner и manager
+    """
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    method = get_one('payment_methods', 'id = %s', (method_id,))
+    if not method:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    
+    update_data = {}
+    if method_data.name is not None:
+        update_data['name'] = method_data.name
+    if method_data.commission_percent is not None:
+        update_data['commission_percent'] = method_data.commission_percent
+    if method_data.is_active is not None:
+        update_data['is_active'] = method_data.is_active
+    
+    execute_update('payment_methods', update_data, 'id = %s', (method_id,))
+    
+    updated_method = get_one('payment_methods', 'id = %s', (method_id,))
+    return updated_method
+
+
+@app.delete("/payment-methods/{method_id}")
+async def delete_payment_method(
+    method_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Удалить метод оплаты (soft delete)
+    
+    Только owner
+    """
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Only owner can delete payment methods")
+    
+    method = get_one('payment_methods', 'id = %s', (method_id,))
+    if not method:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    
+    execute_update('payment_methods', {'is_active': False}, 'id = %s', (method_id,))
+    
+    return {"message": "Payment method deleted successfully"}
+
+
+# --- LOCATIONS ENDPOINTS ---
+
+@app.get("/locations")
+async def get_locations(user_id: int = Depends(get_current_user_id)):
+    """Получить все локации"""
+    locations = get_all(
+        'locations',
+        'is_active = %s',
+        (True,),
+        order_by='name'
+    )
+    return locations
+
+
+@app.post("/locations")
+async def create_location(
+    location_data: LocationCreate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Создать локацию
+    
+    Только owner и manager
+    """
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    new_location_id = execute_insert('locations', {
+        'name': location_data.name,
+        'address': location_data.address,
+        'is_active': True
+    })
+    
+    new_location = get_one('locations', 'id = %s', (new_location_id,))
+    return new_location
+
+
+@app.put("/locations/{location_id}")
+async def update_location(
+    location_id: int,
+    location_data: LocationUpdate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Обновить локацию
+    
+    Только owner и manager
+    """
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if current_user['role'] not in ['owner', 'manager']:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    location = get_one('locations', 'id = %s', (location_id,))
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    
+    update_data = {}
+    if location_data.name is not None:
+        update_data['name'] = location_data.name
+    if location_data.address is not None:
+        update_data['address'] = location_data.address
+    if location_data.is_active is not None:
+        update_data['is_active'] = location_data.is_active
+    
+    execute_update('locations', update_data, 'id = %s', (location_id,))
+    
+    updated_location = get_one('locations', 'id = %s', (location_id,))
+    return updated_location
+
+
+@app.delete("/locations/{location_id}")
+async def delete_location(
+    location_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Удалить локацию (soft delete)
+    
+    Только owner
+    """
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Only owner can delete locations")
+    
+    location = get_one('locations', 'id = %s', (location_id,))
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    
+    execute_update('locations', {'is_active': False}, 'id = %s', (location_id,))
+    
+    return {"message": "Location deleted successfully"}
+
+
+# ============================================
+# TIMELINE & OPERATIONS ENDPOINTS
+# ============================================
+
+# --- PYDANTIC MODELS FOR TIMELINE ---
+
+class TimelineOperationCreate(BaseModel):
+    date: str  # YYYY-MM-DD
+    type: str  # 'expense', 'income', 'transfer'
+    
+    # Для expense/income
+    category_id: Optional[int] = None
+    category_type: Optional[str] = None  # 'expense' или 'income'
+    payment_method_id: Optional[int] = None
+    
+    # Для transfer
+    from_account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    
+    amount: float
+    description: Optional[str] = None
+    location_id: Optional[int] = None
+
+
+class TimelineOperationUpdate(BaseModel):
+    date: Optional[str] = None
+    category_id: Optional[int] = None
+    category_type: Optional[str] = None
+    payment_method_id: Optional[int] = None
+    from_account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    amount: Optional[float] = None
+    description: Optional[str] = None
+    location_id: Optional[int] = None
+
+# --- HELPER FUNCTIONS ---
+
+def update_account_balance(account_id: int, amount_change: Decimal, conn):
+    """
+    Обновить баланс счёта
+    amount_change: положительное для увеличения, отрицательное для уменьшения
+    """
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    # Получить текущий баланс
+    cursor.execute(
+        "SELECT current_balance FROM accounts WHERE id = %s",
+        (account_id,)
+    )
+    account = cursor.fetchone()
+    
+    if not account:
+        raise HTTPException(status_code=404, detail=f"Account {account_id} not found")
+    
+    new_balance = Decimal(str(account['current_balance'])) + amount_change
+    
+    # Проверить что баланс не отрицательный
+    if new_balance < 0:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Insufficient funds in account. Current: {account['current_balance']}, Required: {abs(amount_change)}"
+        )
+    
+    # Обновить баланс
+    cursor.execute(
+        "UPDATE accounts SET current_balance = %s WHERE id = %s",
+        (float(new_balance), account_id)
+    )
+
+
+def validate_operation_data(operation: TimelineOperationCreate):
+    """Валидация данных операции"""
+    
+    if operation.type not in ['expense', 'income', 'transfer']:
+        raise HTTPException(status_code=400, detail="Invalid operation type")
+    
+    if operation.type == 'expense':
+        if not operation.category_id or operation.category_type != 'expense':
+            raise HTTPException(status_code=400, detail="Expense must have expense category")
+        if not operation.payment_method_id:
+            raise HTTPException(status_code=400, detail="Expense must have payment method")
+    
+    elif operation.type == 'income':
+        if not operation.category_id or operation.category_type != 'income':
+            raise HTTPException(status_code=400, detail="Income must have income category")
+        if not operation.payment_method_id:
+            raise HTTPException(status_code=400, detail="Income must have payment method")
+    
+    elif operation.type == 'transfer':
+        if not operation.from_account_id or not operation.to_account_id:
+            raise HTTPException(status_code=400, detail="Transfer must have from_account and to_account")
+        if operation.from_account_id == operation.to_account_id:
+            raise HTTPException(status_code=400, detail="Cannot transfer to the same account")
+    
+    if operation.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+
+def get_account_for_payment_method(payment_method_id: int) -> int:
+    """
+    Определить счёт по методу оплаты
+    Для упрощения: всегда используем первый активный счёт нужного типа
+    """
+    # Получить метод оплаты
+    payment_method = get_one('payment_methods', 'id = %s', (payment_method_id,))
+    
+    if not payment_method:
+        raise HTTPException(status_code=404, detail="Payment method not found")
+    
+    # Логика: наличные → cash счёт, остальное → bank/card
+    if payment_method['name'].lower() in ['наличные', 'cash']:
+        account_type = 'cash'
+    else:
+        account_type = 'bank'  # или 'card', зависит от логики
+    
+    # Найти первый активный счёт этого типа
+    account = get_one('accounts', 'type = %s AND is_active = %s', (account_type, True))
+    
+    if not account:
+        # Если нет счёта нужного типа, взять любой активный
+        account = get_one('accounts', 'is_active = %s', (True,))
+        
+    if not account:
+        raise HTTPException(status_code=404, detail="No active accounts found")
+    
+    return account['id']
+
+# --- TIMELINE ENDPOINTS ---
+
+@app.get("/timeline")
+async def get_timeline(
+    user_id: int = Depends(get_current_user_id),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    type: Optional[str] = None,
+    location_id: Optional[int] = None
+):
+    """
+    Получить список операций с фильтрами
+    
+    Фильтры:
+    - start_date, end_date: период (YYYY-MM-DD)
+    - type: тип операции (expense/income/transfer)
+    - location_id: фильтр по локации
+    - limit, offset: пагинация
+    """
+    
+    # Базовый запрос
+    query = """
+        SELECT 
+            t.*,
+            u.full_name as created_by_name,
+            u.username as created_by_username
+        FROM timeline t
+        LEFT JOIN users u ON t.user_id = u.id
+        WHERE 1=1
+    """
+    
+    params = []
+    
+    # Фильтры
+    if start_date and end_date:
+        query += " AND t.date BETWEEN %s AND %s"
+        params.extend([start_date, end_date])
+    elif start_date:
+        query += " AND t.date >= %s"
+        params.append(start_date)
+    elif end_date:
+        query += " AND t.date <= %s"
+        params.append(end_date)
+    
+    if type:
+        query += " AND t.type = %s"
+        params.append(type)
+    
+    if location_id:
+        query += " AND t.location_id = %s"
+        params.append(location_id)
+    
+    # Сортировка и пагинация
+    query += " ORDER BY t.date DESC, t.id DESC LIMIT %s OFFSET %s"
+    params.extend([limit, offset])
+    
+    # Выполнить запрос
+    operations = execute_query(query, tuple(params), fetch_all=True)
+    
+    return operations if operations else []
+
+
+@app.get("/timeline/{operation_id}")
+async def get_timeline_operation(
+    operation_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    """Получить одну операцию по ID"""
+    
+    operation = get_one('timeline', 'id = %s', (operation_id,))
+    
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    
+    return operation
+
+
+@app.post("/timeline")
+async def create_timeline_operation(
+    operation: TimelineOperationCreate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Создать новую операцию
+    
+    Автоматически обновляет балансы счетов
+    """
+    
+    # Валидация
+    validate_operation_data(operation)
+    
+    # Начать транзакцию
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        # Определить счёт для expense/income
+        account_id = None
+        if operation.type in ['expense', 'income']:
+            account_id = get_account_for_payment_method(operation.payment_method_id)
+        
+        # Создать операцию
+        cursor.execute("""
+            INSERT INTO timeline (
+                date, type, category_id, category_type,
+                from_account_id, to_account_id,
+                amount, payment_method_id, description,
+                location_id, user_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            operation.date,
+            operation.type,
+            operation.category_id,
+            operation.category_type,
+            operation.from_account_id,
+            operation.to_account_id,
+            operation.amount,
+            operation.payment_method_id,
+            operation.description,
+            operation.location_id,
+            user_id
+        ))
+        
+        new_operation_id = cursor.fetchone()['id']
+        
+        # Обновить балансы
+        amount = Decimal(str(operation.amount))
+        
+        if operation.type == 'expense':
+            # Уменьшить баланс счёта
+            update_account_balance(account_id, -amount, conn)
+            
+        elif operation.type == 'income':
+            # Увеличить баланс счёта
+            update_account_balance(account_id, amount, conn)
+            
+        elif operation.type == 'transfer':
+            # Уменьшить from_account
+            update_account_balance(operation.from_account_id, -amount, conn)
+            # Увеличить to_account
+            update_account_balance(operation.to_account_id, amount, conn)
+        
+        # Коммит транзакции
+        conn.commit()
+        
+        # Получить созданную операцию
+        cursor.execute("SELECT * FROM timeline WHERE id = %s", (new_operation_id,))
+        new_operation = cursor.fetchone()
+        
+        return dict(new_operation)
+        
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create operation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.put("/timeline/{operation_id}")
+async def update_timeline_operation(
+    operation_id: int,
+    operation_update: TimelineOperationUpdate,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Обновить операцию
+    
+    ВАЖНО: При изменении amount нужно пересчитать балансы
+    """
+    
+    # Получить текущую операцию
+    current_operation = get_one('timeline', 'id = %s', (operation_id,))
+    
+    if not current_operation:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    
+    # Проверка прав
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    # Только owner может редактировать чужие операции
+    if current_operation['user_id'] != user_id and current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Can only edit own operations")
+    
+    # Начать транзакцию
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        # Если меняется amount, нужно откатить старые изменения балансов
+        # и применить новые
+        amount_changed = operation_update.amount is not None and \
+                        float(operation_update.amount) != float(current_operation['amount'])
+        
+        if amount_changed:
+            old_amount = Decimal(str(current_operation['amount']))
+            new_amount = Decimal(str(operation_update.amount))
+            
+            # Откатить старое изменение
+            if current_operation['type'] == 'expense':
+                account_id = get_account_for_payment_method(current_operation['payment_method_id'])
+                update_account_balance(account_id, old_amount, conn)  # Вернуть деньги
+                update_account_balance(account_id, -new_amount, conn)  # Списать новую сумму
+                
+            elif current_operation['type'] == 'income':
+                account_id = get_account_for_payment_method(current_operation['payment_method_id'])
+                update_account_balance(account_id, -old_amount, conn)  # Убрать старое
+                update_account_balance(account_id, new_amount, conn)  # Добавить новое
+                
+            elif current_operation['type'] == 'transfer':
+                # Откатить старый transfer
+                update_account_balance(current_operation['from_account_id'], old_amount, conn)
+                update_account_balance(current_operation['to_account_id'], -old_amount, conn)
+                # Применить новый
+                update_account_balance(current_operation['from_account_id'], -new_amount, conn)
+                update_account_balance(current_operation['to_account_id'], new_amount, conn)
+        
+        # Подготовить данные для обновления
+        update_fields = []
+        update_values = []
+        
+        if operation_update.date is not None:
+            update_fields.append("date = %s")
+            update_values.append(operation_update.date)
+        
+        if operation_update.category_id is not None:
+            update_fields.append("category_id = %s")
+            update_values.append(operation_update.category_id)
+        
+        if operation_update.category_type is not None:
+            update_fields.append("category_type = %s")
+            update_values.append(operation_update.category_type)
+        
+        if operation_update.amount is not None:
+            update_fields.append("amount = %s")
+            update_values.append(operation_update.amount)
+        
+        if operation_update.description is not None:
+            update_fields.append("description = %s")
+            update_values.append(operation_update.description)
+        
+        if operation_update.payment_method_id is not None:
+            update_fields.append("payment_method_id = %s")
+            update_values.append(operation_update.payment_method_id)
+        
+        if update_fields:
+            update_values.append(operation_id)
+            query = f"UPDATE timeline SET {', '.join(update_fields)} WHERE id = %s"
+            cursor.execute(query, tuple(update_values))
+        
+        conn.commit()
+        
+        # Получить обновлённую операцию
+        cursor.execute("SELECT * FROM timeline WHERE id = %s", (operation_id,))
+        updated_operation = cursor.fetchone()
+        
+        return dict(updated_operation)
+        
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update operation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@app.delete("/timeline/{operation_id}")
+async def delete_timeline_operation(
+    operation_id: int,
+    user_id: int = Depends(get_current_user_id)
+):
+    """
+    Удалить операцию
+    
+    Автоматически откатывает изменения балансов
+    """
+    
+    # Получить операцию
+    operation = get_one('timeline', 'id = %s', (operation_id,))
+    
+    if not operation:
+        raise HTTPException(status_code=404, detail="Operation not found")
+    
+    # Проверка прав
+    current_user = get_one('users', 'id = %s', (user_id,))
+    
+    if operation['user_id'] != user_id and current_user['role'] != 'owner':
+        raise HTTPException(status_code=403, detail="Can only delete own operations")
+    
+    # Начать транзакцию
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        amount = Decimal(str(operation['amount']))
+        
+        # Откатить изменения балансов
+        if operation['type'] == 'expense':
+            # Вернуть деньги на счёт
+            account_id = get_account_for_payment_method(operation['payment_method_id'])
+            update_account_balance(account_id, amount, conn)
+            
+        elif operation['type'] == 'income':
+            # Убрать деньги со счёта
+            account_id = get_account_for_payment_method(operation['payment_method_id'])
+            update_account_balance(account_id, -amount, conn)
+            
+        elif operation['type'] == 'transfer':
+            # Откатить transfer
+            update_account_balance(operation['from_account_id'], amount, conn)
+            update_account_balance(operation['to_account_id'], -amount, conn)
+        
+        # Удалить операцию
+        cursor.execute("DELETE FROM timeline WHERE id = %s", (operation_id,))
+        
+        conn.commit()
+        
+        return {"message": "Operation deleted successfully"}
+        
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete operation: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 
 # ==============================
