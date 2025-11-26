@@ -1213,6 +1213,87 @@ async def get_operations(
         
         return [dict(op) for op in operations]
         
+# ============================================
+# ДОБАВЬ ЭТОТ КОД ПОСЛЕ @app.get("/operations")
+# Строка ~1215 в main.py
+# ============================================
+
+@app.get("/timeline")
+async def get_timeline(
+    user_id: int = Depends(get_current_user_id),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    type: Optional[str] = None,
+    location_id: Optional[int] = None
+):
+    """Получить список операций (alias для /operations)"""
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        query = """
+            SELECT 
+                t.id,
+                t.date,
+                t.type,
+                t.amount,
+                t.description,
+                t.category_id,
+                t.payment_method_id,
+                t.location_id,
+                t.from_account_id,
+                t.to_account_id,
+                t.user_id,
+                t.created_at,
+                c.name as category_name,
+                pm.name as payment_method_name,
+                l.name as location_name,
+                fa.name as from_account_name,
+                ta.name as to_account_name,
+                u.full_name as created_by_name,
+                u.username as created_by_username
+            FROM timeline t
+            LEFT JOIN categories c ON t.category_id = c.id
+            LEFT JOIN payment_methods pm ON t.payment_method_id = pm.id
+            LEFT JOIN locations l ON t.location_id = l.id
+            LEFT JOIN accounts fa ON t.from_account_id = fa.id
+            LEFT JOIN accounts ta ON t.to_account_id = ta.id
+            LEFT JOIN users u ON t.user_id = u.id
+            WHERE 1=1
+        """
+        
+        params = []
+        
+        if start_date:
+            query += " AND t.date >= %s"
+            params.append(start_date)
+        
+        if end_date:
+            query += " AND t.date <= %s"
+            params.append(end_date)
+        
+        if type:
+            query += " AND t.type = %s"
+            params.append(type)
+        
+        if location_id:
+            query += " AND t.location_id = %s"
+            params.append(location_id)
+        
+        query += " ORDER BY t.date DESC, t.created_at DESC LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+        
+        cursor.execute(query, tuple(params))
+        operations = cursor.fetchall()
+        
+        return [dict(op) for op in operations]
+        
+    finally:
+        cursor.close()
+        conn.close()
     finally:
         cursor.close()
         conn.close()
