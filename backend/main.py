@@ -1212,11 +1212,10 @@ async def get_operations(
         operations = cursor.fetchall()
         
         return [dict(op) for op in operations]
-        
-# ============================================
-# ДОБАВЬ ЭТОТ КОД ПОСЛЕ @app.get("/operations")
-# Строка ~1215 в main.py
-# ============================================
+
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.get("/timeline")
 async def get_timeline(
@@ -1291,9 +1290,6 @@ async def get_timeline(
         
         return [dict(op) for op in operations]
         
-    finally:
-        cursor.close()
-        conn.close()
     finally:
         cursor.close()
         conn.close()
