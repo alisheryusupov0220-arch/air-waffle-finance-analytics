@@ -29,15 +29,11 @@ from auth import get_current_user_id
 # ============================================
 
 def get_db_connection():
-    """Подключение к PostgreSQL (Render compatible)"""
+    """Подключение к Supabase PostgreSQL"""
     database_url = os.getenv('DATABASE_URL')
     
     if not database_url:
-        raise Exception("DATABASE_URL not found! Check .env file or Render environment variables")
-    
-    # Render fix: postgres:// -> postgresql://
-    if database_url.startswith('postgres://'):
-        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        raise Exception("DATABASE_URL not found! Check .env file or Railway environment variables")
     
     try:
         conn = psycopg2.connect(database_url)
@@ -859,7 +855,7 @@ class OperationCreate(BaseModel):
     date: str  # YYYY-MM-DD
     category_id: int
     amount: float
-    payment_method_id: int
+    account_id: int  # Изменено: было payment_method_id
     description: Optional[str] = None
     location_id: Optional[int] = None
 
@@ -955,20 +951,20 @@ async def create_expense(
         if category['type'] != 'expense':
             raise HTTPException(status_code=400, detail="Category must be expense type")
         
-        # Определить счёт
-        account_id = get_account_for_payment_method_cursor(operation.payment_method_id, cursor)
+        # Используем account_id напрямую из формы
+        account_id = operation.account_id
         
         # Создать операцию
         cursor.execute("""
             INSERT INTO timeline (
                 date, type, category_id, category_type,
-                amount, payment_method_id, description,
+                amount, description,
                 location_id, user_id
-            ) VALUES (%s, 'expense', %s, 'expense', %s, %s, %s, %s, %s)
+            ) VALUES (%s, 'expense', %s, 'expense', %s, %s, %s, %s)
             RETURNING id
         """, (
             operation.date, operation.category_id, operation.amount,
-            operation.payment_method_id, operation.description,
+            operation.description,
             operation.location_id, user_id
         ))
         
@@ -984,16 +980,16 @@ async def create_expense(
             SELECT 
                 t.*,
                 c.name as category_name,
-                pm.name as payment_method_name,
                 l.name as location_name,
-                u.full_name as created_by_name
+                u.full_name as created_by_name,
+                a.name as account_name
             FROM timeline t
             LEFT JOIN categories c ON t.category_id = c.id
-            LEFT JOIN payment_methods pm ON t.payment_method_id = pm.id
             LEFT JOIN locations l ON t.location_id = l.id
             LEFT JOIN users u ON t.user_id = u.id
+            LEFT JOIN accounts a ON a.id = %s
             WHERE t.id = %s
-        """, (operation_id,))
+        """, (account_id, operation_id))
         
         return dict(cursor.fetchone())
         
@@ -1028,20 +1024,20 @@ async def create_income(
         if category['type'] != 'income':
             raise HTTPException(status_code=400, detail="Category must be income type")
         
-        # Определить счёт
-        account_id = get_account_for_payment_method_cursor(operation.payment_method_id, cursor)
+        # Используем account_id напрямую
+        account_id = operation.account_id
         
         # Создать операцию
         cursor.execute("""
             INSERT INTO timeline (
                 date, type, category_id, category_type,
-                amount, payment_method_id, description,
+                amount, description,
                 location_id, user_id
-            ) VALUES (%s, 'income', %s, 'income', %s, %s, %s, %s, %s)
+            ) VALUES (%s, 'income', %s, 'income', %s, %s, %s, %s)
             RETURNING id
         """, (
             operation.date, operation.category_id, operation.amount,
-            operation.payment_method_id, operation.description,
+            operation.description,
             operation.location_id, user_id
         ))
         
@@ -1057,16 +1053,16 @@ async def create_income(
             SELECT 
                 t.*,
                 c.name as category_name,
-                pm.name as payment_method_name,
                 l.name as location_name,
-                u.full_name as created_by_name
+                u.full_name as created_by_name,
+                a.name as account_name
             FROM timeline t
             LEFT JOIN categories c ON t.category_id = c.id
-            LEFT JOIN payment_methods pm ON t.payment_method_id = pm.id
             LEFT JOIN locations l ON t.location_id = l.id
             LEFT JOIN users u ON t.user_id = u.id
+            LEFT JOIN accounts a ON a.id = %s
             WHERE t.id = %s
-        """, (operation_id,))
+        """, (account_id, operation_id))
         
         return dict(cursor.fetchone())
         
@@ -1151,83 +1147,6 @@ async def get_operations(
     location_id: Optional[int] = None
 ):
     """Получить список операций"""
-    
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
-    try:
-        query = """
-            SELECT 
-                t.id,
-                t.date,
-                t.type,
-                t.amount,
-                t.description,
-                t.category_id,
-                t.payment_method_id,
-                t.location_id,
-                t.from_account_id,
-                t.to_account_id,
-                t.user_id,
-                t.created_at,
-                c.name as category_name,
-                pm.name as payment_method_name,
-                l.name as location_name,
-                fa.name as from_account_name,
-                ta.name as to_account_name,
-                u.full_name as created_by_name,
-                u.username as created_by_username
-            FROM timeline t
-            LEFT JOIN categories c ON t.category_id = c.id
-            LEFT JOIN payment_methods pm ON t.payment_method_id = pm.id
-            LEFT JOIN locations l ON t.location_id = l.id
-            LEFT JOIN accounts fa ON t.from_account_id = fa.id
-            LEFT JOIN accounts ta ON t.to_account_id = ta.id
-            LEFT JOIN users u ON t.user_id = u.id
-            WHERE 1=1
-        """
-        
-        params = []
-        
-        if start_date:
-            query += " AND t.date >= %s"
-            params.append(start_date)
-        
-        if end_date:
-            query += " AND t.date <= %s"
-            params.append(end_date)
-        
-        if type:
-            query += " AND t.type = %s"
-            params.append(type)
-        
-        if location_id:
-            query += " AND t.location_id = %s"
-            params.append(location_id)
-        
-        query += " ORDER BY t.date DESC, t.created_at DESC LIMIT %s OFFSET %s"
-        params.extend([limit, offset])
-        
-        cursor.execute(query, tuple(params))
-        operations = cursor.fetchall()
-        
-        return [dict(op) for op in operations]
-
-    finally:
-        cursor.close()
-        conn.close()
-
-@app.get("/timeline")
-async def get_timeline(
-    user_id: int = Depends(get_current_user_id),
-    limit: int = Query(200, ge=1, le=500),
-    offset: int = Query(0, ge=0),
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    type: Optional[str] = None,
-    location_id: Optional[int] = None
-):
-    """Получить список операций (alias для /operations)"""
     
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
