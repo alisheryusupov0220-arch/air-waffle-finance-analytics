@@ -15,6 +15,10 @@ def get_db_connection():
     if not database_url:
         raise Exception("DATABASE_URL not found in environment variables")
     
+    # Render fix: postgres:// -> postgresql://
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    
     try:
         conn = psycopg2.connect(database_url)
         return conn

@@ -11,6 +11,10 @@ def get_user_id_by_telegram(telegram_id: str) -> Optional[int]:
         if not database_url:
             return None
         
+        # Render fix: postgres:// -> postgresql://
+        if database_url.startswith('postgres://'):
+            database_url = database_url.replace('postgres://', 'postgresql://', 1)
+        
         conn = psycopg2.connect(database_url)
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
