@@ -14,8 +14,9 @@ def get_user_id_by_telegram(telegram_id: str) -> Optional[int]:
         conn = psycopg2.connect(database_url)
         cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         
+        # ИСПРАВЛЕНИЕ: Заменили 'is_active = 1' на 'is_active = TRUE'
         cursor.execute(
-            "SELECT id FROM users WHERE telegram_id = %s AND is_active = 1",
+            "SELECT id FROM users WHERE telegram_id = %s AND is_active = TRUE",
             (int(telegram_id),)
         )
         
