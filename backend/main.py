@@ -849,84 +849,24 @@ async def delete_location(
 # ============================================
 
 # --- MODELS ---
+# ============================================
+# ПРАВИЛЬНЫЙ КОД ДЛЯ ОПЕРАЦИЙ
+# Замени в main.py начиная со строки 853
+# ============================================
 
 class OperationCreate(BaseModel):
-    """Универсальная модель для создания операций"""
+    """Модель для создания расхода/дохода"""
     date: str  # YYYY-MM-DD
     category_id: int
+    account_id: int  # Счет для операции
     amount: float
-    account_id: int  # Изменено: было payment_method_id
     description: Optional[str] = None
     location_id: Optional[int] = None
 
 
-class TransferCreate(BaseModel):
-    """Модель для переводов между счетами"""
-    date: str
-    from_account_id: int
-    to_account_id: int
-    amount: float
-    description: Optional[str] = None
-
-
-# --- HELPER FUNCTIONS ---
-
-def update_account_balance_cursor(account_id: int, amount_change: Decimal, cursor):
-    """Обновить баланс счёта"""
-    cursor.execute(
-        "SELECT current_balance FROM accounts WHERE id = %s AND is_active = true",
-        (account_id,)
-    )
-    account = cursor.fetchone()
-    
-    if not account:
-        raise HTTPException(status_code=404, detail=f"Account {account_id} not found or inactive")
-    
-    current = Decimal(str(account['current_balance']))
-    new_balance = current + amount_change
-    
-    if new_balance < 0:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Insufficient funds. Available: {current}, Required: {abs(amount_change)}"
-        )
-    
-    cursor.execute(
-        "UPDATE accounts SET current_balance = %s WHERE id = %s",
-        (float(new_balance), account_id)
-    )
-
-
-def get_account_for_payment_method_cursor(payment_method_id: int, cursor) -> int:
-    """Определить счёт по методу оплаты"""
-    cursor.execute("SELECT name FROM payment_methods WHERE id = %s", (payment_method_id,))
-    method = cursor.fetchone()
-    
-    if not method:
-        raise HTTPException(status_code=404, detail="Payment method not found")
-    
-    method_name = method['name'].lower()
-    
-    # Логика маппинга: наличные -> cash, остальное -> bank
-    account_type = 'cash' if any(word in method_name for word in ['наличн', 'cash', 'касс']) else 'bank'
-    
-    cursor.execute(
-        "SELECT id FROM accounts WHERE type = %s AND is_active = true ORDER BY id LIMIT 1",
-        (account_type,)
-    )
-    account = cursor.fetchone()
-    
-    if not account:
-        cursor.execute("SELECT id FROM accounts WHERE is_active = true ORDER BY id LIMIT 1")
-        account = cursor.fetchone()
-    
-    if not account:
-        raise HTTPException(status_code=404, detail="No active accounts available")
-    
-    return account['id']
-
-
-# --- OPERATIONS ENDPOINTS ---
+# ============================================
+# POST /operations/expense
+# ============================================
 
 @app.post("/operations/expense")
 async def create_expense(
@@ -942,8 +882,9 @@ async def create_expense(
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
     try:
-        # Проверить категорию
-        cursor.execute("SELECT type FROM categories WHERE id = %s", (operation.category_id,))
+        # 1. Проверить категорию
+        cursor.execute("SELECT type FROM categories WHERE id = %s AND is_active = TRUE", 
+                      (operation.category_id,))
         category = cursor.fetchone()
         
         if not category:
@@ -951,55 +892,93 @@ async def create_expense(
         if category['type'] != 'expense':
             raise HTTPException(status_code=400, detail="Category must be expense type")
         
-        # Используем account_id напрямую из формы
-        account_id = operation.account_id
+        # 2. Проверить счет
+        cursor.execute("SELECT id, balance FROM accounts WHERE id = %s", 
+                      (operation.account_id,))
+        account = cursor.fetchone()
         
-        # Создать операцию
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # 3. Создать операцию
         cursor.execute("""
             INSERT INTO timeline (
-                date, type, category_id, category_type,
-                amount, description,
-                location_id, user_id
-            ) VALUES (%s, 'expense', %s, 'expense', %s, %s, %s, %s)
+                date, type, category_id,
+                amount, from_account_id,
+                description, location_id, user_id,
+                created_at
+            ) VALUES (
+                %s, 'expense', %s,
+                %s, %s,
+                %s, %s, %s,
+                NOW()
+            )
             RETURNING id
         """, (
-            operation.date, operation.category_id, operation.amount,
+            operation.date,
+            operation.category_id,
+            operation.amount,
+            operation.account_id,
             operation.description,
-            operation.location_id, user_id
+            operation.location_id,
+            user_id
         ))
         
         operation_id = cursor.fetchone()['id']
         
-        # Обновить баланс
-        update_account_balance_cursor(account_id, -Decimal(str(operation.amount)), cursor)
+        # 4. Обновить баланс счета (вычесть)
+        cursor.execute("""
+            UPDATE accounts 
+            SET balance = balance - %s
+            WHERE id = %s
+        """, (operation.amount, operation.account_id))
         
         conn.commit()
         
-        # Вернуть операцию с joined данными
+        # 5. Вернуть созданную операцию с joined данными
         cursor.execute("""
             SELECT 
-                t.*,
+                t.id,
+                t.date,
+                t.type,
+                t.amount,
+                t.description,
+                t.category_id,
+                t.from_account_id,
+                t.location_id,
+                t.user_id,
+                t.created_at,
                 c.name as category_name,
+                a.name as account_name,
                 l.name as location_name,
                 u.full_name as created_by_name,
-                a.name as account_name
+                u.username as created_by_username
             FROM timeline t
             LEFT JOIN categories c ON t.category_id = c.id
+            LEFT JOIN accounts a ON t.from_account_id = a.id
             LEFT JOIN locations l ON t.location_id = l.id
             LEFT JOIN users u ON t.user_id = u.id
-            LEFT JOIN accounts a ON a.id = %s
             WHERE t.id = %s
-        """, (account_id, operation_id))
+        """, (operation_id,))
         
-        return dict(cursor.fetchone())
+        result = cursor.fetchone()
+        return dict(result)
         
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
+        print(f"❌ Error creating expense: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
         conn.close()
 
+
+# ============================================
+# POST /operations/income
+# ============================================
 
 @app.post("/operations/income")
 async def create_income(
@@ -1015,8 +994,9 @@ async def create_income(
     cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     
     try:
-        # Проверить категорию
-        cursor.execute("SELECT type FROM categories WHERE id = %s", (operation.category_id,))
+        # 1. Проверить категорию
+        cursor.execute("SELECT type FROM categories WHERE id = %s AND is_active = TRUE", 
+                      (operation.category_id,))
         category = cursor.fetchone()
         
         if not category:
@@ -1024,112 +1004,84 @@ async def create_income(
         if category['type'] != 'income':
             raise HTTPException(status_code=400, detail="Category must be income type")
         
-        # Используем account_id напрямую
-        account_id = operation.account_id
+        # 2. Проверить счет
+        cursor.execute("SELECT id, balance FROM accounts WHERE id = %s", 
+                      (operation.account_id,))
+        account = cursor.fetchone()
         
-        # Создать операцию
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # 3. Создать операцию
         cursor.execute("""
             INSERT INTO timeline (
-                date, type, category_id, category_type,
-                amount, description,
-                location_id, user_id
-            ) VALUES (%s, 'income', %s, 'income', %s, %s, %s, %s)
+                date, type, category_id,
+                amount, to_account_id,
+                description, location_id, user_id,
+                created_at
+            ) VALUES (
+                %s, 'income', %s,
+                %s, %s,
+                %s, %s, %s,
+                NOW()
+            )
             RETURNING id
         """, (
-            operation.date, operation.category_id, operation.amount,
+            operation.date,
+            operation.category_id,
+            operation.amount,
+            operation.account_id,
             operation.description,
-            operation.location_id, user_id
+            operation.location_id,
+            user_id
         ))
         
         operation_id = cursor.fetchone()['id']
         
-        # Обновить баланс
-        update_account_balance_cursor(account_id, Decimal(str(operation.amount)), cursor)
+        # 4. Обновить баланс счета (добавить)
+        cursor.execute("""
+            UPDATE accounts 
+            SET balance = balance + %s
+            WHERE id = %s
+        """, (operation.amount, operation.account_id))
         
         conn.commit()
         
-        # Вернуть операцию с joined данными
+        # 5. Вернуть созданную операцию с joined данными
         cursor.execute("""
             SELECT 
-                t.*,
+                t.id,
+                t.date,
+                t.type,
+                t.amount,
+                t.description,
+                t.category_id,
+                t.to_account_id,
+                t.location_id,
+                t.user_id,
+                t.created_at,
                 c.name as category_name,
+                a.name as account_name,
                 l.name as location_name,
                 u.full_name as created_by_name,
-                a.name as account_name
+                u.username as created_by_username
             FROM timeline t
             LEFT JOIN categories c ON t.category_id = c.id
+            LEFT JOIN accounts a ON t.to_account_id = a.id
             LEFT JOIN locations l ON t.location_id = l.id
-            LEFT JOIN users u ON t.user_id = u.id
-            LEFT JOIN accounts a ON a.id = %s
-            WHERE t.id = %s
-        """, (account_id, operation_id))
-        
-        return dict(cursor.fetchone())
-        
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        cursor.close()
-        conn.close()
-
-
-@app.post("/operations/transfer")
-async def create_transfer(
-    transfer: TransferCreate,
-    user_id: int = Depends(get_current_user_id)
-):
-    """Создать перевод между счетами"""
-    
-    if transfer.amount <= 0:
-        raise HTTPException(status_code=400, detail="Amount must be positive")
-    
-    if transfer.from_account_id == transfer.to_account_id:
-        raise HTTPException(status_code=400, detail="Cannot transfer to same account")
-    
-    conn = get_db_connection()
-    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    
-    try:
-        # Создать операцию
-        cursor.execute("""
-            INSERT INTO timeline (
-                date, type, from_account_id, to_account_id,
-                amount, description, user_id
-            ) VALUES (%s, 'transfer', %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (
-            transfer.date, transfer.from_account_id, transfer.to_account_id,
-            transfer.amount, transfer.description, user_id
-        ))
-        
-        operation_id = cursor.fetchone()['id']
-        
-        # Обновить балансы
-        amount = Decimal(str(transfer.amount))
-        update_account_balance_cursor(transfer.from_account_id, -amount, cursor)
-        update_account_balance_cursor(transfer.to_account_id, amount, cursor)
-        
-        conn.commit()
-        
-        # Вернуть операцию
-        cursor.execute("""
-            SELECT 
-                t.*,
-                fa.name as from_account_name,
-                ta.name as to_account_name,
-                u.full_name as created_by_name
-            FROM timeline t
-            LEFT JOIN accounts fa ON t.from_account_id = fa.id
-            LEFT JOIN accounts ta ON t.to_account_id = ta.id
             LEFT JOIN users u ON t.user_id = u.id
             WHERE t.id = %s
         """, (operation_id,))
         
-        return dict(cursor.fetchone())
+        result = cursor.fetchone()
+        return dict(result)
         
+    except HTTPException:
+        conn.rollback()
+        raise
     except Exception as e:
         conn.rollback()
+        print(f"❌ Error creating income: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         cursor.close()
