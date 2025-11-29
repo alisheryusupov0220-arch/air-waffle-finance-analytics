@@ -1,155 +1,234 @@
+"""
+Air Waffle Finance - Database Helper Functions
+Правильные функции для работы с PostgreSQL
+"""
 import os
-import sqlite3
-from contextlib import contextmanager
-from pathlib import Path
-from typing import Generator
-
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    # python-dotenv not installed in this environment — continue without loading .env
-    pass
-
-ROOT_DIR = Path(__file__).resolve().parent.parent
-
-# If a FINANCE_DB_PATH env var is provided, use it. Otherwise prefer a
-# mounted persistent volume under /data (Railway, Docker volumes). If /data
-# doesn't exist, fall back to the local development path.
-_dev_path = Path("/Users/alisheryusupov2002/Desktop/finance_system_v5/finance_v5.db")
-_railway_path = Path("/data/finance_v5.db")
-DEFAULT_DB_PATH = _railway_path if Path("/data").exists() else _dev_path
-DB_PATH = Path(os.getenv("FINANCE_DB_PATH", DEFAULT_DB_PATH))
+import psycopg2
+import psycopg2.extras
+from typing import Optional, List, Dict, Any, Tuple
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-@contextmanager
-def db_session() -> Generator[sqlite3.Connection, None, None]:
-    conn = get_connection()
+def get_db_connection():
+    """Получить подключение к PostgreSQL"""
+    database_url = os.getenv('DATABASE_URL')
+    
+    if not database_url:
+        raise Exception("DATABASE_URL not found in environment variables")
+    
+    # Render fix: postgres:// -> postgresql://
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    
     try:
-        yield conn
+        conn = psycopg2.connect(database_url)
+        return conn
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
+        raise
+
+
+def execute_query(
+    query: str,
+    params: Optional[Tuple] = None,
+    fetch_one: bool = False,
+    fetch_all: bool = False,
+    return_id: bool = False
+) -> Any:
+    """
+    Выполнить SQL запрос с автоматическим управлением соединением
+    
+    Args:
+        query: SQL запрос (с %s placeholders)
+        params: Параметры для запроса
+        fetch_one: Вернуть одну строку как dict
+        fetch_all: Вернуть все строки как list[dict]
+        return_id: Вернуть ID вставленной записи (для INSERT)
+    
+    Returns:
+        dict, list[dict], int или None
+    
+    Examples:
+        # SELECT один
+        user = execute_query("SELECT * FROM users WHERE id = %s", (user_id,), fetch_one=True)
+        
+        # SELECT все
+        users = execute_query("SELECT * FROM users WHERE is_active = %s", (True,), fetch_all=True)
+        
+        # INSERT с возвратом ID
+        new_id = execute_query(
+            "INSERT INTO users (telegram_id, full_name) VALUES (%s, %s) RETURNING id",
+            (123456, "John"),
+            return_id=True
+        )
+        
+        # UPDATE/DELETE
+        execute_query("UPDATE users SET is_active = %s WHERE id = %s", (False, user_id))
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    
+    try:
+        if params:
+            cursor.execute(query, params)
+        else:
+            cursor.execute(query)
+        
+        result = None
+        
+        if return_id:
+            # Для INSERT ... RETURNING id
+            result = cursor.fetchone()
+            result = result['id'] if result else None
+        elif fetch_one:
+            result = cursor.fetchone()
+        elif fetch_all:
+            result = cursor.fetchall()
+        
         conn.commit()
-    except Exception:
+        return result
+        
+    except Exception as e:
         conn.rollback()
+        print(f"❌ SQL Error: {e}")
+        print(f"Query: {query}")
+        print(f"Params: {params}")
         raise
     finally:
+        cursor.close()
         conn.close()
 
 
-def init_cashier_reports_tables():
-    """Инициализация таблиц для кассирских отчётов"""
-    import os
-
-    # ПРАВИЛЬНЫЙ ПУТЬ К БД
-    if os.path.exists('/data'):
-        DB_PATH = '/data/finance_v5.db'
+def execute_insert(
+    table: str,
+    data: Dict[str, Any],
+    return_id: bool = True
+) -> Optional[int]:
+    """
+    Вставить запись в таблицу (упрощённый helper)
+    
+    Args:
+        table: Название таблицы
+        data: Словарь {column: value}
+        return_id: Вернуть ID новой записи
+    
+    Returns:
+        ID новой записи или None
+    
+    Example:
+        user_id = execute_insert('users', {
+            'telegram_id': 123456,
+            'full_name': 'John Doe',
+            'role': 'cashier'
+        })
+    """
+    columns = ', '.join(data.keys())
+    placeholders = ', '.join(['%s'] * len(data))
+    values = tuple(data.values())
+    
+    query = f"INSERT INTO {table} ({columns}) VALUES ({placeholders})"
+    
+    if return_id:
+        query += " RETURNING id"
+        return execute_query(query, values, return_id=True)
     else:
-        DB_PATH = 'finance_v5.db'
-
-    print(f"Creating DB at: {DB_PATH}")
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    # Таблица точек продаж
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS locations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            address TEXT,
-            is_active INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Таблица методов оплаты
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS payment_methods (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            method_type TEXT CHECK (method_type IN ('terminal', 'online', 'delivery', 'cash')),
-            commission_percent REAL DEFAULT 0,
-            is_active INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Основная таблица отчётов
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cashier_reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_date TEXT NOT NULL,
-            location_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            total_sales REAL NOT NULL,
-            cash_expected REAL,
-            cash_actual REAL,
-            cash_difference REAL,
-            status TEXT DEFAULT 'open' CHECK (status IN ('open', 'closed', 'verified')),
-            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-            closed_at TEXT,
-            notes TEXT,
-            FOREIGN KEY (location_id) REFERENCES locations(id),
-            FOREIGN KEY (user_id) REFERENCES users(id),
-            UNIQUE(report_date, location_id)
-        )
-    ''')
-    
-    # Детали по методам оплаты
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cashier_report_payments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id INTEGER NOT NULL,
-            payment_method_id INTEGER NOT NULL,
-            amount REAL NOT NULL,
-            commission_amount REAL DEFAULT 0,
-            net_amount REAL NOT NULL,
-            FOREIGN KEY (report_id) REFERENCES cashier_reports(id) ON DELETE CASCADE,
-            FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
-        )
-    ''')
-    
-    # Расходы в отчёте
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cashier_report_expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id INTEGER NOT NULL,
-            category_id INTEGER,
-            amount REAL NOT NULL,
-            description TEXT,
-            FOREIGN KEY (report_id) REFERENCES cashier_reports(id) ON DELETE CASCADE,
-            FOREIGN KEY (category_id) REFERENCES expense_categories(id)
-        )
-    ''')
-    
-    # Прочие приходы в отчёте
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cashier_report_income (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_id INTEGER NOT NULL,
-            category_id INTEGER,
-            amount REAL NOT NULL,
-            description TEXT,
-            FOREIGN KEY (report_id) REFERENCES cashier_reports(id) ON DELETE CASCADE,
-            FOREIGN KEY (category_id) REFERENCES income_categories(id)
-        )
-    ''')
-    
-    # Индексы
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cashier_reports_date ON cashier_reports(report_date)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cashier_reports_location ON cashier_reports(location_id)')
-    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cashier_reports_user ON cashier_reports(user_id)')
-    
-    conn.commit()
-    conn.close()
-    print("✅ Таблицы для кассирских отчётов созданы")
+        execute_query(query, values)
+        return None
 
 
-if __name__ == "__main__":
-    init_cashier_reports_tables()
+def execute_update(
+    table: str,
+    data: Dict[str, Any],
+    where: str,
+    where_params: Tuple
+) -> None:
+    """
+    Обновить записи в таблице
+    
+    Args:
+        table: Название таблицы
+        data: Словарь {column: new_value}
+        where: WHERE условие с %s placeholders
+        where_params: Параметры для WHERE
+    
+    Example:
+        execute_update(
+            'users',
+            {'full_name': 'New Name', 'updated_at': 'NOW()'},
+            'id = %s',
+            (user_id,)
+        )
+    """
+    set_clause = ', '.join([f"{col} = %s" for col in data.keys()])
+    values = tuple(data.values()) + where_params
+    
+    query = f"UPDATE {table} SET {set_clause} WHERE {where}"
+    execute_query(query, values)
 
+
+def execute_delete(
+    table: str,
+    where: str,
+    where_params: Tuple
+) -> None:
+    """
+    Удалить записи из таблицы
+    
+    Args:
+        table: Название таблицы
+        where: WHERE условие с %s placeholders
+        where_params: Параметры для WHERE
+    
+    Example:
+        execute_delete('users', 'id = %s', (user_id,))
+    """
+    query = f"DELETE FROM {table} WHERE {where}"
+    execute_query(query, where_params)
+
+
+def get_one(table: str, where: str, where_params: Tuple) -> Optional[Dict]:
+    """
+    Получить одну запись
+    
+    Example:
+        user = get_one('users', 'telegram_id = %s', (123456,))
+    """
+    query = f"SELECT * FROM {table} WHERE {where}"
+    return execute_query(query, where_params, fetch_one=True)
+
+
+def get_all(
+    table: str,
+    where: Optional[str] = None,
+    where_params: Optional[Tuple] = None,
+    order_by: Optional[str] = None,
+    limit: Optional[int] = None
+) -> List[Dict]:
+    """
+    Получить несколько записей
+    
+    Example:
+        users = get_all('users', 'is_active = %s', (True,), order_by='created_at DESC', limit=10)
+    """
+    query = f"SELECT * FROM {table}"
+    
+    if where:
+        query += f" WHERE {where}"
+    
+    if order_by:
+        query += f" ORDER BY {order_by}"
+    
+    if limit:
+        query += f" LIMIT {limit}"
+    
+    return execute_query(query, where_params, fetch_all=True)
+
+
+# Для обратной совместимости
+def row_to_dict(row):
+    """
+    Конвертировать RealDictRow в обычный dict
+    (На самом деле не нужно - RealDictRow уже ведёт себя как dict)
+    """
+    if row is None:
+        return None
+    return dict(row)
